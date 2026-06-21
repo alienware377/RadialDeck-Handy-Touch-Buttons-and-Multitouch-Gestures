@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/injector/bin/
+build/injector/obj/
+build/injector/RadialDeckInput.exe
+
+# Electron debug logs (stray numeric-named log dumps)
+/[0-9]*
+
+# OS / editor cruft
+Thumbs.db
+.DS_Store
+*.log

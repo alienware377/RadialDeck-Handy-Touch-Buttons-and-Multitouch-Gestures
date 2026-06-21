@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="overlay.css" />
+</head>
+<body>
+  <div id="root">
+    <div id="panel"></div>
+    <div id="orb" class="interactive" title="Tap: collapse/expand · Long-press: switch layout · Drag: move · Right-click: edit">
+      <span id="orbGlyph">G</span>
+    </div>
+    <div id="orbLabel"></div>
+    <div id="tools">
+      <button id="btnEdit" class="tool interactive" title="Edit layouts (Ctrl+Alt+E)">✎</button>
+      <button id="btnHide" class="tool interactive" title="Hide (Ctrl+Alt+Space)">✕</button>
+    </div>
+  </div>
+  <script src="icons.js"></script>
+  <script src="overlay.js"></script>
+</body>
+</html>

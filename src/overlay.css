@@ -1,0 +1,132 @@
+* { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-user-drag: none;
+  touch-action: none; /* this is a control surface — never let the browser steal a finger drag as a pan/scroll gesture (which fires pointercancel and aborts the orb drag) */ }
+html, body { width: 100%; height: 100%; background: transparent; overflow: hidden;
+  font-family: "Segoe UI", system-ui, sans-serif; cursor: default; }
+
+#root { position: absolute; inset: 0; }
+#panel { position: absolute; inset: 0; }
+
+/* ---- shared button look ---- */
+.key, .gkey, .gridgroup {
+  position: absolute;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  color: #fff; font-size: 13px; font-weight: 600; line-height: 1.05; padding: 4px;
+  border: 1.5px solid rgba(255,255,255,0.14);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.12);
+  transition: transform .08s ease, filter .08s ease, box-shadow .12s ease;
+  backdrop-filter: blur(6px); overflow: hidden; word-break: break-word;
+}
+.key { border-radius: 50%; transform: translate(-50%, -50%); }        /* radial: centered */
+.gkey, .gridgroup { border-radius: 14px; }                            /* grid: rounded rect */
+.key:hover, .gkey:hover, .gridgroup:hover { filter: brightness(1.18); }
+.key:hover { transform: translate(-50%, -50%) scale(1.1); }
+.gkey:hover, .gridgroup:hover { transform: scale(1.04); }
+.key.active { transform: translate(-50%, -50%) scale(0.9); filter: brightness(1.5); }
+.gkey.active { transform: scale(0.94); filter: brightness(1.5); }
+.held { box-shadow: 0 0 0 3px rgba(255,255,255,0.55), 0 4px 14px rgba(0,0,0,0.45); filter: brightness(1.3); }
+.on { box-shadow: 0 0 0 3px #ffd34d, 0 4px 14px rgba(0,0,0,0.45); filter: brightness(1.35); }
+/* icon (built-in SVG or custom image) shown instead of the text label */
+.ico { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; overflow: hidden; }
+.ico > svg, .ico > img { width: var(--isz, 100%); height: var(--isz, 100%); display: block; }
+.ico > img { object-fit: contain; }
+.ico.fit-fill > img { object-fit: cover; }
+.ico.fit-stretch > img { object-fit: fill; }
+.ico.fit-pad { padding: 16%; }
+.badge { position: absolute; top: 3px; right: 6px; font-size: 8px; font-weight: 700; opacity: .6; letter-spacing: .3px; }
+.gridgroup .folder { position: absolute; bottom: 4px; right: 7px; font-size: 11px; opacity: .8; }
+
+/* ---- scroll widget ---- */
+.scrollw {
+  position: absolute; border-radius: 14px; cursor: ns-resize;
+  border: 1.5px solid rgba(255,255,255,0.14);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06), 0 4px 14px rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+  background-size: 100% 16px;
+}
+.scrollw.h { cursor: ew-resize; }
+.scrollw .grip { color: rgba(255,255,255,0.75); font-size: 11px; font-weight: 700;
+  writing-mode: vertical-rl; text-orientation: mixed; letter-spacing: 2px; }
+.scrollw.h .grip { writing-mode: horizontal-tb; }
+.scrollw.dragging { filter: brightness(1.25); }
+
+/* ---- touchpad surface ---- */
+.touchpad {
+  position: absolute; border-radius: 16px; overflow: hidden;
+  border: 1.5px solid rgba(255,255,255,0.16);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05), inset 0 0 46px rgba(0,0,0,0.4), 0 4px 14px rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  color: rgba(255,255,255,0.55);
+}
+/* faint dotted texture overlay so it reads as a tactile pad (inline gradient stays the base) */
+.touchpad::before { content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .5;
+  background-image: radial-gradient(rgba(255,255,255,0.12) 1px, transparent 1.4px); background-size: 18px 18px; }
+.touchpad .hint { position: relative; z-index: 1; pointer-events: none; font-size: 11px; font-weight: 600;
+  line-height: 1.7; letter-spacing: .3px; opacity: .8; text-transform: uppercase; }
+.touchpad.dragging { filter: brightness(1.12); }
+
+/* ---- center orb ---- */
+#orb {
+  position: absolute; z-index: 5; transform: translate(-50%, -50%);
+  width: 64px; height: 64px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle at 35% 30%, #6fa0ff, #2f55c8 70%, #20307a);
+  border: 2px solid rgba(255,255,255,0.35);
+  box-shadow: 0 6px 22px rgba(0,0,0,0.5), inset 0 2px 6px rgba(255,255,255,0.3);
+  color: #fff; font-size: 24px; font-weight: 800; cursor: grab;
+  transition: box-shadow .12s ease;
+}
+#orb:active { cursor: grabbing; }
+#orb.dragging { box-shadow: 0 0 0 4px rgba(255,255,255,0.25), 0 8px 26px rgba(0,0,0,0.6); }
+#orbGlyph { pointer-events: none; }
+
+#orbLabel {
+  position: absolute; z-index: 5; transform: translateX(-50%);
+  font-size: 11px; font-weight: 700; color: #fff;
+  background: rgba(20,22,28,0.82); padding: 3px 10px; border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.15); white-space: nowrap; pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  transition: opacity .35s ease;
+}
+#orbLabel.faded { opacity: 0; }
+
+#tools { position: absolute; top: 4px; right: 4px; z-index: 6; display: flex; gap: 6px;
+  opacity: 0; transition: opacity .15s ease; }
+#root:hover #tools { opacity: 1; }
+.tool { width: 24px; height: 24px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(30,33,42,0.92); color: #fff; font-size: 12px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; }
+.tool:hover { background: rgba(60,66,82,0.95); }
+
+body.collapsed #tools { display: none; }
+body.collapsed #orbLabel { display: none; }
+
+/* ---- state-change motion: buttons emanate from / retract into the orb ----
+   Each button gets --rd-dx/--rd-dy: the vector from the button's centre back to
+   the orb (parent) centre, set in JS. The "small" keyframe sits the button on
+   the orb (translated by that vector, scaled down); the "full" keyframe is its
+   resting place. So buttons fly OUT of the parent and snap back INTO it.
+   Radial keys carry a base translate(-50%,-50%) which every frame re-states, so
+   the animation never clobbers their centering. The cubic-bezier overshoots
+   gently past the target for a soft, bouncy-but-calm settle. */
+@keyframes rdInKey  { 0% { opacity: 0; transform: translate(-50%,-50%) translate(var(--rd-dx,0px), var(--rd-dy,0px)) scale(.3); }
+                    100% { opacity: 1; transform: translate(-50%,-50%) translate(0,0) scale(1); } }
+@keyframes rdInGrid { 0% { opacity: 0; transform: translate(var(--rd-dx,0px), var(--rd-dy,0px)) scale(.3); }
+                    100% { opacity: 1; transform: translate(0,0) scale(1); } }
+@keyframes rdOutKey  { 0% { opacity: 1; transform: translate(-50%,-50%) translate(0,0) scale(1); }
+                     100% { opacity: 0; transform: translate(-50%,-50%) translate(var(--rd-dx,0px), var(--rd-dy,0px)) scale(.2); } }
+@keyframes rdOutGrid { 0% { opacity: 1; transform: translate(0,0) scale(1); }
+                     100% { opacity: 0; transform: translate(var(--rd-dx,0px), var(--rd-dy,0px)) scale(.2); } }
+
+.key.rd-in { animation: rdInKey .34s cubic-bezier(.34,1.56,.64,1) backwards; }
+.gkey.rd-in, .gridgroup.rd-in, .scrollw.rd-in, .touchpad.rd-in { animation: rdInGrid .34s cubic-bezier(.34,1.56,.64,1) backwards; }
+.key.rd-out { animation: rdOutKey .34s ease-in forwards; }
+.gkey.rd-out, .gridgroup.rd-out, .scrollw.rd-out, .touchpad.rd-out { animation: rdOutGrid .34s ease-in forwards; }
+
+@keyframes rdOrbPop { 0% { transform: translate(-50%,-50%) scale(1); }
+                     38% { transform: translate(-50%,-50%) scale(.84); }
+                    100% { transform: translate(-50%,-50%) scale(1); } }
+#orb.rd-pop { animation: rdOrbPop .34s cubic-bezier(.34,1.56,.64,1); }
+
+@media (prefers-reduced-motion: reduce) {
+  .rd-in, .rd-out, #orb.rd-pop { animation: none !important; }
+}

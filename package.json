@@ -1,0 +1,30 @@
+{
+  "name": "radialdeck",
+  "version": "1.0.0",
+  "description": "RadialDeck — a radial virtual keyboard overlay for creators. Float shortcut layouts over any app and fire them by touch or pen.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "node build/pack.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@electron/packager": "^20.0.1",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "png-to-ico": "^3.0.1"
+  },
+  "build": {
+    "appId": "com.radialdeck.app",
+    "productName": "RadialDeck",
+    "files": [
+      "src/**/*"
+    ],
+    "afterPack": "build/afterPack.js",
+    "win": {
+      "target": "dir",
+      "requestedExecutionLevel": "asInvoker"
+    }
+  }
+}

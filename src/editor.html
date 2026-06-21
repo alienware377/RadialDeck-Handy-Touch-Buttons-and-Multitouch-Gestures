@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="editor.css" />
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="dot"></span> RadialDeck <small>Layout Editor</small></div>
+    <div class="globals">
+      <label title="Radial ring radius">Radius <input id="optRadius" type="range" min="80" max="220" /></label>
+      <label title="Radial button size">Button <input id="optButton" type="range" min="36" max="84" /></label>
+      <button id="btnUndo" class="hbtn" title="Undo (Ctrl+Z)" disabled>↶</button>
+      <button id="btnRedo" class="hbtn" title="Redo (Ctrl+Y)" disabled>↷</button>
+      <span id="saveState">saved</span>
+    </div>
+  </header>
+
+  <main>
+    <aside id="layouts">
+      <div class="aside-head">
+        <span>Layouts</span>
+        <button id="addLayout" class="mini" title="Add layout">＋</button>
+      </div>
+      <ul id="layoutList"></ul>
+    </aside>
+
+    <section id="work">
+      <div id="layoutBar">
+        <input id="layName" type="text" class="lay-name" placeholder="Layout name" />
+        <input id="layColor" type="color" class="lay-color" title="Orb / accent color" />
+        <div class="seg" id="modeSeg">
+          <button data-mode="radial">Radial</button>
+          <button data-mode="grid">Grid</button>
+        </div>
+        <div id="gridOpts" class="grid-opts">
+          <label>Cell <input id="optCell" type="number" min="32" max="120" step="2" /></label>
+          <label>Gap <input id="optGap" type="number" min="0" max="40" /></label>
+          <label>Cols <input id="optCols" type="number" min="1" max="12" /></label>
+          <label>Rows <input id="optRows" type="number" min="1" max="12" /></label>
+        </div>
+      </div>
+
+      <div id="breadcrumb"></div>
+
+      <div id="canvasRow">
+        <div id="canvasWrap">
+          <div id="addBar"></div>
+          <div id="radialView">
+            <div id="previewRing"></div>
+            <div id="previewOrb"></div>
+          </div>
+          <div id="gridScroll"><div id="gridView"></div></div>
+        </div>
+        <div id="props"><div class="props-empty">Select an item to edit it.</div></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="captureHint" class="hidden">Press any key combo… <span>(Esc to cancel)</span></div>
+
+  <script src="icons.js"></script>
+  <script src="editor.js"></script>
+</body>
+</html>
