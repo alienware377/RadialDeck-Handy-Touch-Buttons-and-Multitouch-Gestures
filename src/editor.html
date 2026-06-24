@@ -12,6 +12,7 @@
       <label title="Radial button size">Button <input id="optButton" type="range" min="36" max="84" /></label>
       <button id="btnUndo" class="hbtn" title="Undo (Ctrl+Z)" disabled>↶</button>
       <button id="btnRedo" class="hbtn" title="Redo (Ctrl+Y)" disabled>↷</button>
+      <button id="btnGestures" class="hbtn" title="Edit global touch gestures">Gestures…</button>
       <span id="saveState">saved</span>
     </div>
   </header>
@@ -61,5 +62,12 @@
 
   <script src="icons.js"></script>
   <script src="editor.js"></script>
+  <script>
+    // Open the standalone Gestures window (independent of the layout editor).
+    (function () {
+      var b = document.getElementById('btnGestures');
+      if (b && window.rd && window.rd.openGestures) b.addEventListener('click', function () { window.rd.openGestures(); });
+    })();
+  </script>
 </body>
 </html>

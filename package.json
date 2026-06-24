@@ -5,7 +5,8 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "node build/pack.js"
+    "dist": "node build/pack.js",
+    "installer": "node build/pack.js && node build/make-installer.js"
   },
   "author": "",
   "license": "MIT",
@@ -15,16 +16,5 @@
     "electron-builder": "^25.0.0",
     "png-to-ico": "^3.0.1"
   },
-  "build": {
-    "appId": "com.radialdeck.app",
-    "productName": "RadialDeck",
-    "files": [
-      "src/**/*"
-    ],
-    "afterPack": "build/afterPack.js",
-    "win": {
-      "target": "dir",
-      "requestedExecutionLevel": "asInvoker"
-    }
-  }
+  "_note": "Installer is built by build/make-installer.js (a self-elevating C# bootstrapper that embeds dist/win-unpacked). electron-builder is NOT used: its winCodeSign step needs symlink privilege and the project lives on a cloud drive elevated processes can't see."
 }

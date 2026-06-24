@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="editor.css" />
+  <style>
+    body { display: flex; flex-direction: column; height: 100vh; margin: 0; overflow: hidden; }
+    #ghead { display: flex; align-items: center; gap: 14px; padding: 10px 16px; border-bottom: 1px solid var(--line, #2a2e38); background: var(--panel, #1b1e25); }
+    #ghead .brand { font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    #ghead .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: #9b6cff; display: inline-block; }
+    #ghead .spacer { flex: 1; }
+    .switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+    #gmain { flex: 1; display: flex; min-height: 0; }
+    #glist { flex: 1; overflow: auto; padding: 12px 16px; }
+    #gside { width: 340px; border-left: 1px solid var(--line, #2a2e38); background: var(--panel, #1b1e25); padding: 14px 16px; overflow: auto; }
+    .grow { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center;
+      padding: 10px 12px; border: 1px solid var(--line, #2a2e38); border-radius: 10px; margin-bottom: 8px; background: #1e222b; }
+    .grow.disabled { opacity: .5; }
+    .grow .gname { font-weight: 600; }
+    .grow .gmeta { grid-column: 1 / 2; font-size: 12px; color: #9aa3b2; }
+    .grow .gact { grid-column: 1 / 2; font-size: 12px; color: #c7d0df; }
+    .grow .gctl { grid-column: 2 / 3; grid-row: 1 / 4; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+    .chip { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #2c3140; color: #c7d0df; margin-right: 4px; }
+    .sec-title { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #8b94a6; margin: 4px 0 8px; }
+    .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+    .field > label { font-size: 12px; color: #9aa3b2; }
+    .field input[type=text], .field input[type=number], .field select { background: #12151b; border: 1px solid var(--line, #2a2e38); color: #e6e9ef; border-radius: 8px; padding: 7px 9px; font-size: 13px; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .hbtn, .mini, button.primary, button.ghost { cursor: pointer; }
+    button.primary { background: #6d52ff; color: #fff; border: none; border-radius: 8px; padding: 8px 14px; font-size: 13px; }
+    button.ghost { background: transparent; color: #c7d0df; border: 1px solid var(--line, #2a2e38); border-radius: 8px; padding: 6px 10px; font-size: 12px; }
+    button.danger { background: transparent; color: #e0726b; border: 1px solid #5a3a3a; border-radius: 8px; padding: 4px 9px; font-size: 12px; }
+    #recPanel { border: 1px dashed #4a4f5e; border-radius: 10px; padding: 10px; margin-top: 6px; text-align: center; }
+    #recCanvas { background: #0f1218; border-radius: 8px; margin-top: 8px; }
+    .hint { font-size: 12px; color: #8b94a6; }
+    #recState { font-weight: 600; margin: 6px 0; }
+    .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+    .empty { color: #8b94a6; padding: 24px; text-align: center; }
+    #saveState { font-size: 12px; color: #7bd88f; }
+    #saveState.dirty { color: #f2b53b; }
+  </style>
+</head>
+<body>
+  <div id="ghead">
+    <div class="brand"><span class="dot"></span> RadialDeck <small>Gestures</small></div>
+    <label class="switch" title="Master enable for all global gestures">
+      <input type="checkbox" id="masterEnable" /> Gestures enabled
+    </label>
+    <label class="switch" title="Claim 3+ finger touches so other apps don't also react to them (uses the signed injector; auto-releases for safety)">
+      <input type="checkbox" id="captureMulti" /> Capture 3+ finger
+    </label>
+    <span class="spacer"></span>
+    <span id="saveState">saved</span>
+    <button class="primary" id="btnSave">Save</button>
+  </div>
+
+  <div id="gmain">
+    <div id="glist">
+      <div class="toolbar">
+        <button class="primary" id="btnAdd">＋ Add gesture</button>
+        <button class="ghost" id="btnAdvanced">Advanced settings</button>
+        <span class="hint">Whole-screen gestures fire even when the deck is hidden.</span>
+      </div>
+      <div id="rows"></div>
+      <div id="advanced" class="hidden" style="margin-top:14px;border-top:1px solid var(--line,#2a2e38);padding-top:12px;">
+        <div class="sec-title">Recognition tuning</div>
+        <div class="row2">
+          <div class="field"><label>Edge margin (px)</label><input type="number" id="setEdge" min="6" max="120" /></div>
+          <div class="field"><label>Min swipe travel (px)</label><input type="number" id="setSwipe" min="40" max="400" /></div>
+          <div class="field"><label>Tap max move (px)</label><input type="number" id="setTapPx" min="8" max="80" /></div>
+          <div class="field"><label>Tap max time (ms)</label><input type="number" id="setTapMs" min="120" max="700" /></div>
+          <div class="field"><label>Rotate min angle (°)</label><input type="number" id="setRot" min="15" max="120" /></div>
+          <div class="field"><label>Pinch ratio (≤ = in)</label><input type="number" id="setPinch" min="0.4" max="0.95" step="0.01" /></div>
+          <div class="field"><label>Path match score (0–1)</label><input type="number" id="setScore" min="0.5" max="0.97" step="0.01" /></div>
+          <div class="field"><label>Cooldown (ms)</label><input type="number" id="setCool" min="120" max="1200" /></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="gside">
+      <div id="editorPanel" class="hidden">
+        <div class="sec-title" id="edTitle">New gesture</div>
+        <div class="field"><label>Name</label><input type="text" id="edName" placeholder="e.g. 4-finger up → Task View" /></div>
+        <div class="row2">
+          <div class="field"><label>Type</label>
+            <select id="edKind">
+              <option value="swipe">Finger swipe (direction)</option>
+              <option value="edge">Edge swipe (from screen edge)</option>
+              <option value="tap">Tap</option>
+              <option value="pinch">Pinch (in / out)</option>
+              <option value="rotate">Rotate (cw / ccw)</option>
+              <option value="path">Path shape (built-in)</option>
+              <option value="custom">Custom (recorded)</option>
+            </select>
+          </div>
+          <div class="field"><label>Fingers</label>
+            <select id="edFingers">
+              <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+              <option value="4">4</option><option value="5">5</option>
+            </select>
+          </div>
+        </div>
+        <div class="field" id="edDirWrap"><label>Direction</label>
+          <select id="edDir"></select>
+        </div>
+        <div class="field" id="edShapeWrap"><label>Shape</label>
+          <select id="edShape">
+            <option value="circle">Circle</option>
+            <option value="half-circle">Half circle</option>
+            <option value="s">S</option>
+            <option value="s-side">Sideways S</option>
+            <option value="figure8">Figure 8</option>
+          </select>
+        </div>
+        <div id="recWrap" class="field hidden">
+          <label>Recorded gesture</label>
+          <div id="recPanel">
+            <div id="recState" class="hint">No gesture recorded yet.</div>
+            <canvas id="recCanvas" width="200" height="120"></canvas>
+            <div><button class="ghost" id="btnRecord">● Record gesture</button></div>
+            <div class="hint">Click, then perform the gesture with the chosen finger count.</div>
+          </div>
+        </div>
+
+        <div class="sec-title" style="margin-top:10px;">Action</div>
+        <div class="field"><label>Do</label>
+          <select id="edAction">
+            <option value="press">Send keystroke</option>
+            <option value="command">Run command / launch</option>
+            <option value="rd-control">RadialDeck control</option>
+          </select>
+        </div>
+        <div class="field" id="edComboWrap"><label id="edComboLabel">Keys</label>
+          <input type="text" id="edCombo" placeholder="e.g. ctrl+shift+s" />
+          <button class="ghost" id="btnCapture" style="margin-top:6px;">⌨ Capture keys…</button>
+        </div>
+        <div class="field hidden" id="edVerbWrap"><label>Control</label>
+          <select id="edVerb">
+            <option value="toggle-deck">Show / hide deck</option>
+            <option value="show-deck">Show deck</option>
+            <option value="hide-deck">Hide deck</option>
+            <option value="next-layout">Next layout</option>
+            <option value="prev-layout">Previous layout</option>
+          </select>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:14px;">
+          <button class="primary" id="btnApply">Apply</button>
+          <button class="ghost" id="btnCancel">Cancel</button>
+        </div>
+      </div>
+      <div id="sideEmpty" class="hint">Select <b>Add gesture</b> or edit one to configure it here.</div>
+    </div>
+  </div>
+
+  <script src="gestures-editor.js"></script>
+</body>
+</html>

@@ -260,11 +260,16 @@ class Keyboard {
       this._connecting = false;
       try { sock.destroy(); } catch {}
       if (this._disposed || this.pipe || this._connTimer) return;
-      // keep trying ~40s: the injector may still be verifying its signature / cold-starting.
-      // PS covers input the whole time, so this long poll is invisible to the user.
-      if (attempt < 200) {
-        this._connTimer = setTimeout(() => { this._connTimer = null; this._connect(attempt + 1); }, 200);
-      }
+      // Retry FOREVER (with backoff), never give up. On a cold boot the injector's first
+      // launch (Authenticode/cert-chain verification + .NET cold start) can take far longer
+      // than the old 40s cap — and on a freshly-booted box AV/disk contention can stretch it
+      // to minutes. If we stop retrying, the app silently sits on the normal-integrity PS
+      // fallback forever (UIPI then blocks elevated targets -> "scrolling broke again" after
+      // a restart). PS covers input the whole time, so an indefinite slow poll is invisible.
+      // Also re-launch the injector periodically in case the first spawn lost the race.
+      const delay = attempt < 40 ? 200 : (attempt < 80 ? 1000 : 3000); // 0-8s fast, then 1s, then 3s
+      if (attempt > 0 && attempt % 20 === 0) this._ensureInjector();
+      this._connTimer = setTimeout(() => { this._connTimer = null; this._connect(attempt + 1); }, delay);
     });
     sock.once('close', () => {
       this._connecting = false;
@@ -409,6 +414,11 @@ class Keyboard {
     if (!hwndHex) return;
     this._send(`RTW ${hwndHex}`);
   }
+
+  // Capture mode: tell the uiAccess injector to globally claim (true) or release (false)
+  // touch input, so 3+ finger gestures don't also reach the app underneath. The injector
+  // auto-releases after ~1.5s if engage isn't renewed (watchdog), so this can't get stuck.
+  setCapture(on) { this._send('CAP ' + (on ? '1' : '0')); }
 
   // ---- touchpad: move the system cursor relatively, and click mouse buttons ----
   mouseMove(dx, dy) {

@@ -430,7 +430,8 @@ function renderProps() {
     h += row('Combo / Command', `<div class="combo-wrap"><input type="text" id="pCombo" placeholder="${cmdPh}" value="${escapeAttr(it.combo)}" /><button class="cap" id="pRec">REC</button></div>`);
     h += row('Action', `<select id="pAction">
       <option value="press">Press</option><option value="hold">Hold</option>
-      <option value="toggle">Toggle</option><option value="command">Command</option></select>`);
+      <option value="toggle">Toggle</option><option value="command">Command</option>
+      <option value="gesture-toggle">Gestures on/off</option></select>`);
   }
   if (it.type === 'scroll') {
     h += row('Axis', `<select id="pAxis"><option value="v">Vertical</option><option value="h">Horizontal</option></select>`);

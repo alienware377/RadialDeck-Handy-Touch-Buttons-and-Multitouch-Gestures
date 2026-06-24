@@ -5,6 +5,7 @@ const fs = require('fs');
 const store = require('./store');
 const { Keyboard } = require('./keyboard');
 const { TouchTracker } = require('./touch');
+const { Gestures } = require('./gestures');
 
 // ---- UIAccess + Chromium child-process workaround ----
 // With uiAccess="true" the exe gets a higher-integrity token, and Chromium's
@@ -23,10 +24,12 @@ const { TouchTracker } = require('./touch');
 
 let overlayWin = null;
 let editorWin = null;
+let gesturesWin = null;
 let tray = null;
 let kb = null;
 let cfg = null;
 let touch = null;
+let gestures = null;
 
 // ---- synthetic cursor (Windows hides the real arrow while a finger is touching,
 // so during touchpad use we draw our own sprite that tracks the injected cursor) ----
@@ -134,8 +137,18 @@ function ensureOnScreen() {
 // promoting physical touch on it to OS mouse moves / pan gestures (which otherwise
 // warp the cursor to the finger and scroll whatever window is under it). The overlay
 // is WS_EX_NOACTIVATE + transparent, so without this Windows runs the legacy touch
-// path on it. Called a few times because the helper transport may still be spinning up.
-function registerOverlayTouch() {
+// path on it.
+//
+// CRITICAL: Electron delivers physical touch to a CHILD render-widget HWND
+// (Chrome_RenderWidgetHostHWND), and the injector registers the whole subtree. But
+// that child HWND is DESTROYED and RE-CREATED whenever the GPU/render process restarts
+// — which routinely happens on a cold boot ("GPU process exited unexpectedly"). When
+// it's recreated the touch registration is lost and the pan-leak bug "comes back after
+// a PC restart." A one-shot burst of re-asserts can't cover a restart that lands later,
+// so we re-register on every render-view/GPU recovery event (did-finish-load,
+// render-process-gone, responsive) — that covers the exact moments the child HWND is
+// recreated, with no need for a perpetual polling interval.
+function rtwOnce() {
   if (!kb || !overlayWin || overlayWin.isDestroyed()) return;
   let hex = null;
   try {
@@ -143,12 +156,13 @@ function registerOverlayTouch() {
     if (buf && buf.length >= 8) hex = buf.readBigUInt64LE(0).toString(16);
     else if (buf && buf.length >= 4) hex = (buf.readUInt32LE(0) >>> 0).toString(16);
   } catch {}
-  if (!hex) return;
-  kb.registerTouchWindow(hex);
-  // re-assert: transport may connect late, and re-creating the window invalidates it
-  [300, 1000, 2500].forEach((ms) => setTimeout(() => {
-    if (kb && overlayWin && !overlayWin.isDestroyed()) kb.registerTouchWindow(hex);
-  }, ms));
+  if (hex) kb.registerTouchWindow(hex);
+}
+function registerOverlayTouch() {
+  if (!kb || !overlayWin || overlayWin.isDestroyed()) return;
+  rtwOnce();
+  // immediate burst: transport may connect late, window/child may settle late
+  [300, 1000, 2500].forEach((ms) => setTimeout(rtwOnce, ms));
 }
 
 function createOverlay() {
@@ -174,6 +188,13 @@ function createOverlay() {
     registerOverlayTouch();
   });
   overlayWin.on('show', registerOverlayTouch);
+  // Re-register whenever the render view is (re)created — these fire after a GPU/render
+  // process restart, which recreates the Chrome_RenderWidgetHostHWND child and drops the
+  // touch registration. Without this the pan-leak bug returns on the next cold boot.
+  const wc = overlayWin.webContents;
+  wc.on('did-finish-load', registerOverlayTouch);
+  wc.on('render-process-gone', () => setTimeout(registerOverlayTouch, 500));
+  wc.on('responsive', registerOverlayTouch);
 }
 
 function createEditor() {
@@ -188,9 +209,22 @@ function createEditor() {
   editorWin.on('closed', () => { editorWin = null; });
 }
 
+function createGesturesWindow() {
+  if (gesturesWin && !gesturesWin.isDestroyed()) { gesturesWin.focus(); return; }
+  gesturesWin = new BrowserWindow({
+    width: 940, height: 720, minWidth: 760, minHeight: 520,
+    title: 'RadialDeck — Gestures', icon: ICON, backgroundColor: '#15171c',
+    webPreferences: { preload: path.join(__dirname, 'preload.js') },
+  });
+  gesturesWin.setMenuBarVisibility(false);
+  gesturesWin.loadFile(path.join(__dirname, 'gestures.html'));
+  gesturesWin.on('closed', () => { gesturesWin = null; });
+}
+
 function broadcastConfig() {
   if (overlayWin && !overlayWin.isDestroyed()) overlayWin.webContents.send('config', cfg);
   if (editorWin && !editorWin.isDestroyed()) editorWin.webContents.send('config', cfg);
+  if (gesturesWin && !gesturesWin.isDestroyed()) gesturesWin.webContents.send('config', cfg);
 }
 
 function buildTray() {
@@ -201,6 +235,7 @@ function buildTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Show / Hide overlay', click: toggleOverlay },
     { label: 'Edit layouts…', click: createEditor },
+    { label: 'Edit gestures…', click: createGesturesWindow },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
   ]));
@@ -216,9 +251,21 @@ function toggleOverlay() {
 // ---------- IPC ----------
 ipcMain.handle('get-config', () => cfg);
 
-ipcMain.on('save-config', (_e, newCfg) => { cfg = newCfg; store.save(cfg); broadcastConfig(); });
+ipcMain.on('save-config', (_e, newCfg) => { cfg = newCfg; store.save(cfg); broadcastConfig(); startGestures(); });
 
 ipcMain.on('set-active-layout', (_e, idx) => { cfg.activeLayout = idx; store.save(cfg); broadcastConfig(); });
+
+// Editor: capture the next on-screen stroke as a custom-gesture template. Resolves with
+// { ok, points, fingers } or { ok:false, timeout }. Engine is started if it wasn't running.
+ipcMain.handle('gesture-record', (_e, fingers) => new Promise((resolve) => {
+  startGestures();
+  if (!gestures) { resolve({ ok: false }); return; }
+  if (!gestures.proc) gestures.start();
+  let done = false;
+  const finish = (r) => { if (done) return; done = true; clearTimeout(to); resolve(r); };
+  const to = setTimeout(() => { gestures.cancelRecording(); finish({ ok: false, timeout: true }); }, 9000);
+  gestures.startRecording(fingers || 0, (res) => finish(res));
+}));
 
 ipcMain.on('key-action', (_e, msg) => {
   if (!kb) return;
@@ -230,6 +277,14 @@ ipcMain.on('key-action', (_e, msg) => {
     if (phase === 'down') {
       const on = kb.toggle(id, combo);
       if (overlayWin) overlayWin.webContents.send('toggle-state', { id, on });
+    }
+  }
+  else if (action === 'gesture-toggle') {
+    if (phase === 'down' || phase === undefined) {
+      cfg.gestureSettings = cfg.gestureSettings || {};
+      cfg.gestureSettings.enabled = !gesturesEnabled();
+      store.save(cfg); startGestures(); broadcastConfig();
+      if (overlayWin && !overlayWin.isDestroyed()) overlayWin.webContents.send('toggle-state', { id, on: gesturesEnabled() });
     }
   }
 });
@@ -284,11 +339,58 @@ ipcMain.handle('pick-image', async () => {
 });
 
 ipcMain.on('open-editor', createEditor);
+ipcMain.on('open-gestures', createGesturesWindow);
 ipcMain.on('hide-overlay', () => { if (overlayWin) overlayWin.hide(); });
+
+// Save ONLY the gesture config (avoids clobbering layout edits made in the other window).
+ipcMain.on('save-gestures', (_e, payload) => {
+  if (!cfg) return;
+  if (payload && Array.isArray(payload.gestures)) cfg.gestures = payload.gestures;
+  if (payload && payload.gestureSettings) cfg.gestureSettings = payload.gestureSettings;
+  store.save(cfg); broadcastConfig(); startGestures();
+});
 
 function runCommand(cmd) {
   if (!cmd) return;
   require('child_process').exec(cmd, { windowsHide: true }, () => {});
+}
+
+// ---------- global gestures ----------
+function switchLayout(delta) {
+  if (!cfg || !Array.isArray(cfg.layouts) || !cfg.layouts.length) return;
+  const n = cfg.layouts.length;
+  cfg.activeLayout = (((cfg.activeLayout || 0) + delta) % n + n) % n;
+  store.save(cfg); broadcastConfig();
+}
+function rdControl(verb) {
+  switch (verb) {
+    case 'toggle-deck': case 'collapse-toggle': toggleOverlay(); break;
+    case 'show-deck':
+      if (!overlayWin || overlayWin.isDestroyed()) createOverlay();
+      else { ensureOnScreen(); overlayWin.show(); }
+      break;
+    case 'hide-deck': if (overlayWin && !overlayWin.isDestroyed()) overlayWin.hide(); break;
+    case 'next-layout': switchLayout(1); break;
+    case 'prev-layout': switchLayout(-1); break;
+  }
+}
+function fireGesture(b) {
+  if (!b) return;
+  if (b.action === 'command') runCommand(b.combo);
+  else if (b.action === 'rd-control') rdControl(b.combo);
+  else if (kb) kb.press(b.combo); // 'press' (keystroke combo)
+}
+function gesturesEnabled() { return !(cfg && cfg.gestureSettings && cfg.gestureSettings.enabled === false); }
+function startGestures() {
+  if (!gestures) {
+    gestures = new Gestures({
+      getSettings: () => (cfg && cfg.gestureSettings) || {},
+      getBindings: () => (cfg && cfg.gestures) || [],
+      onGesture: (b) => fireGesture(b),
+      onCapture: (on) => { if (kb) kb.setCapture(on); }, // gestures.js gates by captureMultiFinger
+    });
+  }
+  if (gesturesEnabled()) gestures.start(); else gestures.stop();
 }
 
 // ---------- lifecycle ----------
@@ -308,11 +410,12 @@ if (!gotLock) {
     });
     createOverlay();
     startAppPointTracking();
+    startGestures();
     buildTray();
     globalShortcut.register('Control+Alt+Space', toggleOverlay);
     globalShortcut.register('Control+Alt+E', createEditor);
   });
 
-  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (kb) kb.dispose(); if (touch) touch.dispose(); hideCursorWin(); });
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (kb) kb.dispose(); if (touch) touch.dispose(); if (gestures) gestures.stop(); hideCursorWin(); });
   app.on('window-all-closed', () => { /* stay alive in tray */ });
 }

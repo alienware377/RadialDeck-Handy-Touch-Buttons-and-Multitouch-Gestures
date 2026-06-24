@@ -172,8 +172,10 @@ function paint(el, k) {
   const ico = RDIcons.html(k);
   el.innerHTML = (ico || `<span>${esc(k.label || k.combo || '')}</span>`) +
     (k.action && k.action !== 'press' ? `<span class="badge">${badge(k.action)}</span>` : '');
+  // gesture-toggle buttons reflect the live engine state (lit = gestures on)
+  if (k.action === 'gesture-toggle') el.classList.toggle('on', !!(cfg && cfg.gestureSettings && cfg.gestureSettings.enabled !== false));
 }
-const badge = (a) => (a === 'hold' ? 'HLD' : a === 'toggle' ? 'TGL' : a === 'command' ? 'CMD' : '');
+const badge = (a) => (a === 'hold' ? 'HLD' : a === 'toggle' ? 'TGL' : a === 'command' ? 'CMD' : a === 'gesture-toggle' ? 'GES' : '');
 
 // ---------- item interactions ----------
 let interacting = 0;
@@ -184,6 +186,8 @@ function bindItem(el, k) {
     el.addEventListener('pointerup', up); el.addEventListener('pointerleave', up); el.addEventListener('pointercancel', up);
   } else if (k.action === 'toggle') {
     el.addEventListener('pointerdown', (e) => { e.preventDefault(); window.rd.keyAction({ id: k.id, combo: k.combo, action: 'toggle', phase: 'down' }); });
+  } else if (k.action === 'gesture-toggle') {
+    el.addEventListener('pointerdown', (e) => { e.preventDefault(); window.rd.keyAction({ id: k.id, action: 'gesture-toggle', phase: 'down' }); });
   } else {
     el.addEventListener('pointerdown', (e) => { e.preventDefault(); flash(el); window.rd.keyAction({ id: k.id, combo: k.combo, action: k.action }); });
   }

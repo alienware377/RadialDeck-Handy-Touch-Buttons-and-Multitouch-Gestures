@@ -14,7 +14,10 @@ contextBridge.exposeInMainWorld('rd', {
   setOverlayBounds: (b) => ipcRenderer.send('set-overlay-bounds', b),
   pickImage: () => ipcRenderer.invoke('pick-image'),
   openEditor: () => ipcRenderer.send('open-editor'),
+  openGestures: () => ipcRenderer.send('open-gestures'),
   hideOverlay: () => ipcRenderer.send('hide-overlay'),
+  recordGesture: (fingers) => ipcRenderer.invoke('gesture-record', fingers),
+  saveGestures: (payload) => ipcRenderer.send('save-gestures', payload),
   onConfig: (cb) => ipcRenderer.on('config', (_e, c) => cb(c)),
   onToggleState: (cb) => ipcRenderer.on('toggle-state', (_e, s) => cb(s)),
 });

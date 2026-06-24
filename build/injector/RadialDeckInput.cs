@@ -52,6 +52,23 @@ static class Native
         public IntPtr hwndActive, hwndFocus, hwndCapture, hwndMenuOwner, hwndMoveSize, hwndCaret;
         public RECT rcCaret;
     }
+
+    // ---- capture window + pointer-input-target (capture mode) ----
+    public delegate IntPtr WndProc(IntPtr h, uint m, IntPtr w, IntPtr l);
+    [StructLayout(LayoutKind.Sequential)] public struct WNDCLASS { public uint style; public IntPtr lpfnWndProc; public int cbClsExtra; public int cbWndExtra; public IntPtr hInstance; public IntPtr hIcon; public IntPtr hCursor; public IntPtr hbrBackground; [MarshalAs(UnmanagedType.LPWStr)] public string lpszMenuName; [MarshalAs(UnmanagedType.LPWStr)] public string lpszClassName; }
+    [StructLayout(LayoutKind.Sequential)] public struct MSG { public IntPtr hwnd; public uint message; public IntPtr wParam; public IntPtr lParam; public uint time; public int ptx; public int pty; }
+    [DllImport("user32.dll", SetLastError=true)] public static extern ushort RegisterClassW(ref WNDCLASS c);
+    [DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Unicode)] public static extern IntPtr CreateWindowExW(uint ex, string cls, string name, uint style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr inst, IntPtr p);
+    [DllImport("user32.dll")] public static extern IntPtr DefWindowProcW(IntPtr h, uint m, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] public static extern int GetMessageW(out MSG m, IntPtr h, uint a, uint b);
+    [DllImport("user32.dll")] public static extern bool TranslateMessage(ref MSG m);
+    [DllImport("user32.dll")] public static extern IntPtr DispatchMessageW(ref MSG m);
+    [DllImport("user32.dll", SetLastError=true)] public static extern bool PostMessageW(IntPtr h, uint m, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] public static extern IntPtr SetTimer(IntPtr h, IntPtr id, uint ms, IntPtr cb);
+    [DllImport("user32.dll")] public static extern bool KillTimer(IntPtr h, IntPtr id);
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr GetModuleHandleW(string n);
+    [DllImport("user32.dll", SetLastError=true)] public static extern bool RegisterPointerInputTarget(IntPtr h, int type);
+    [DllImport("user32.dll", SetLastError=true)] public static extern bool UnregisterPointerInputTarget(IntPtr h, int type);
 }
 
 static class Program
@@ -65,6 +82,58 @@ static class Program
     // wheel target captured by the most recent 'F' command
     static IntPtr _target = IntPtr.Zero;
     static int _tx = 0, _ty = 0;
+
+    // ---- capture mode: globally claim touch so 3+ finger gestures don't reach apps ----
+    // A hidden window registers as the system pointer-input target for PT_TOUCH while a
+    // 3+ finger gesture is in progress, so redirected touch is swallowed here instead of
+    // reaching the foreground app. The gesture host (via Node) sends "CAP 1" on engage and
+    // "CAP 0" on release. SAFETY: a 1.5s watchdog timer auto-releases if renews stop (host
+    // crash / lost release), so touch can never get stuck captured. Killing this process
+    // (owner-pid watch) also frees the registration immediately.
+    const int PT_TOUCH = 2;
+    const uint WM_TIMER = 0x0113;
+    const uint WM_CAP_ON = 0x8001;   // WM_APP+1
+    const uint WM_CAP_OFF = 0x8002;  // WM_APP+2
+    const uint WM_POINTER_FIRST = 0x0245, WM_POINTER_LAST = 0x0257;
+    static IntPtr _capHwnd = IntPtr.Zero;
+    static bool _captured = false;
+    static Native.WndProc _capProc;
+
+    static void StartCaptureWindow()
+    {
+        var t = new Thread(() =>
+        {
+            _capProc = CapProc; // keep delegate alive
+            var wc = new Native.WNDCLASS();
+            wc.lpfnWndProc = Marshal.GetFunctionPointerForDelegate(_capProc);
+            wc.hInstance = Native.GetModuleHandleW(null);
+            wc.lpszClassName = "RDCapSink";
+            Native.RegisterClassW(ref wc);
+            _capHwnd = Native.CreateWindowExW(0, "RDCapSink", "RDCapSink", 0x80000000u, 0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, wc.hInstance, IntPtr.Zero);
+            Native.MSG m;
+            while (Native.GetMessageW(out m, IntPtr.Zero, 0, 0) > 0) { Native.TranslateMessage(ref m); Native.DispatchMessageW(ref m); }
+        });
+        t.IsBackground = true;
+        try { t.SetApartmentState(ApartmentState.STA); } catch { }
+        t.Start();
+    }
+    static IntPtr CapProc(IntPtr h, uint msg, IntPtr w, IntPtr l)
+    {
+        if (msg == WM_CAP_ON)
+        {
+            if (!_captured && Native.RegisterPointerInputTarget(h, PT_TOUCH)) { _captured = true; Log("capture ON"); }
+            Native.SetTimer(h, (IntPtr)1, 1500, IntPtr.Zero); // (re)arm watchdog
+            return IntPtr.Zero;
+        }
+        if (msg == WM_CAP_OFF || msg == WM_TIMER)
+        {
+            if (_captured) { Native.UnregisterPointerInputTarget(h, PT_TOUCH); _captured = false; Log(msg == WM_TIMER ? "capture auto-release" : "capture OFF"); }
+            Native.KillTimer(h, (IntPtr)1);
+            return IntPtr.Zero;
+        }
+        if (msg >= WM_POINTER_FIRST && msg <= WM_POINTER_LAST) return IntPtr.Zero; // swallow redirected touch
+        return Native.DefWindowProcW(h, msg, w, l);
+    }
 
     static int Main(string[] args)
     {
@@ -81,6 +150,8 @@ static class Program
                 if (int.TryParse(args[0], out ownerPid))
                     StartOwnerWatch(ownerPid);
             }
+
+            StartCaptureWindow(); // hidden window for capture-mode pointer-input target
 
             while (true)
             {
@@ -152,6 +223,13 @@ static class Program
         var p = line.Split(' ');
         if (p.Length < 2) return;
         string cmd = p[0];
+
+        if (cmd == "CAP")
+        {
+            if (_capHwnd != IntPtr.Zero)
+                Native.PostMessageW(_capHwnd, p[1] == "1" ? WM_CAP_ON : WM_CAP_OFF, IntPtr.Zero, IntPtr.Zero);
+            return;
+        }
 
         if (cmd == "F")
         {
