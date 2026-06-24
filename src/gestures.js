@@ -272,13 +272,11 @@ class Gestures {
       if (!this._stopped) setTimeout(() => this.start(), 1200); // auto-respawn
     });
     this.log('gesture host started');
-    // Engage always-on capture IMMEDIATELY if the setting is on; don't wait for first touch.
-    try { if (this._settings && this._settings().captureMultiFinger) this._engageCapture(); } catch {}
   }
 
   stop() {
     this._stopped = true;
-    this._releaseCapture(); // release touch + tear down renewer
+    if (this._capActive) { this._capActive = false; this._sendCapture(false); } // release touch
     if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
     if (this.proc) { try { this.proc.kill(); } catch {} this.proc = null; }
   }
@@ -286,29 +284,19 @@ class Gestures {
   startRecording(fingers, cb) { this._record = { fingers: fingers || 0, cb }; }
   cancelRecording() { this._record = null; }
 
-  // Capture mode (v2 — always-on + re-inject):
-  // When captureMultiFinger is enabled, register the injector as the system pointer
-  // input target IMMEDIATELY and keep it that way. The injector now re-injects 1-2
-  // finger touches via InjectTouchInput so apps still receive normal touch, but it
-  // drops 3+ finger frames so gestures don't leak to other apps. This also fixes
-  // ghost/wrong-window touch routing because we control where every touch is delivered.
-  // A 1s renewer keeps the injector's 2s watchdog from auto-releasing.
-  _updateCapture(_count) {
+  // Capture mode: while >=3 contacts are down (and the setting is on), tell the injector to
+  // globally claim touch so it doesn't reach apps. Renew every ~400ms (the injector's
+  // watchdog auto-releases after 1.5s). Release the instant all fingers lift.
+  _updateCapture(count) {
     const on = !!this._settings().captureMultiFinger;
-    if (on) this._engageCapture(); else this._releaseCapture();
-  }
-  _engageCapture() {
-    if (this._capActive) return;
-    this._capActive = true;
-    this._sendCapture(true);
-    if (this._capRenewer) clearInterval(this._capRenewer);
-    this._capRenewer = setInterval(() => { if (this._capActive) this._sendCapture(true); }, 1000);
-  }
-  _releaseCapture() {
-    if (this._capRenewer) { clearInterval(this._capRenewer); this._capRenewer = null; }
-    if (!this._capActive) return;
-    this._capActive = false;
-    this._sendCapture(false);
+    if (!on) { if (this._capActive) { this._capActive = false; this._sendCapture(false); } return; }
+    if (count >= 3) {
+      const now = Date.now();
+      if (!this._capActive) { this._capActive = true; this._lastCap = now; this._sendCapture(true); }
+      else if (now - (this._lastCap || 0) > 400) { this._lastCap = now; this._sendCapture(true); } // renew watchdog
+    } else if (count === 0 && this._capActive) {
+      this._capActive = false; this._sendCapture(false);
+    }
   }
   _sendCapture(on) { try { if (this.opts.onCapture) this.opts.onCapture(on); } catch (e) { this.log('onCapture err ' + e); } }
 

@@ -69,42 +69,6 @@ static class Native
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr GetModuleHandleW(string n);
     [DllImport("user32.dll", SetLastError=true)] public static extern bool RegisterPointerInputTarget(IntPtr h, int type);
     [DllImport("user32.dll", SetLastError=true)] public static extern bool UnregisterPointerInputTarget(IntPtr h, int type);
-
-    // ---- touch injection (InjectTouchInput) — always-on capture + re-injection mode ----
-    [DllImport("user32.dll", SetLastError=true)] public static extern bool InitializeTouchInjection(uint maxCount, uint dwMode);
-    [DllImport("user32.dll", SetLastError=true)] public static extern bool InjectTouchInput(uint count, [In] POINTER_TOUCH_INFO[] contacts);
-    [DllImport("user32.dll", SetLastError=true)] public static extern bool GetPointerType(uint pointerId, out uint pointerType);
-    [DllImport("user32.dll", SetLastError=true)] public static extern bool GetPointerFrameTouchInfo(uint pointerId, ref uint count, [Out] POINTER_TOUCH_INFO[] touchInfos);
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct POINTER_INFO {
-        public uint pointerType;
-        public uint pointerId;
-        public uint frameId;
-        public uint pointerFlags;
-        public IntPtr sourceDevice;
-        public IntPtr hwndTarget;
-        public POINT ptPixelLocation;
-        public POINT ptHimetricLocation;
-        public POINT ptPixelLocationRaw;
-        public POINT ptHimetricLocationRaw;
-        public uint dwTime;
-        public uint historyCount;
-        public int  InputData;
-        public uint dwKeyStates;
-        public ulong PerformanceCount;
-        public uint ButtonChangeType;
-    }
-    [StructLayout(LayoutKind.Sequential)]
-    public struct POINTER_TOUCH_INFO {
-        public POINTER_INFO pointerInfo;
-        public uint  touchFlags;
-        public uint  touchMask;
-        public RECT  rcContact;
-        public RECT  rcContactRaw;
-        public uint  orientation;
-        public uint  pressure;
-    }
 }
 
 static class Program
@@ -119,57 +83,21 @@ static class Program
     static IntPtr _target = IntPtr.Zero;
     static int _tx = 0, _ty = 0;
 
-    // ---- capture mode v2: ALWAYS-ON capture + selective re-injection ----
-    // When capture mode is enabled (CAP 1), the hidden window registers as the system
-    // pointer-input target for PT_TOUCH PERMANENTLY (not just during 3+ finger gestures).
-    // For each WM_POINTER frame we count active non-injected contacts:
-    //   - count < 3: re-inject via InjectTouchInput so the app underneath still receives
-    //     the touch (preserves 1-2 finger interaction; routes to whatever window is
-    //     actually under the contact point — fixes "jumpy scroll to ghost monitor").
-    //   - count >= 3: drop (the gesture host handles these as gestures).
-    // We filter POINTER_FLAG_INJECTED to avoid an infinite re-inject loop.
-    // Slot map: OS pointer IDs are mapped to injection slots 0..MAX_SLOTS-1 because
-    // InjectTouchInput requires pointerId values in [0, MAX_SLOTS).
-    // SAFETY: a 2-second watchdog still auto-releases the registration if "CAP 1"
-    // renewals stop; killing this process (owner-pid watch) also frees it immediately.
-    const int  PT_TOUCH = 2;
-    const uint PT_TOUCH_PT = 2;
-    const uint TOUCH_FEEDBACK_INDIRECT = 0x00000002;  // no on-screen ripple for injected touches
+    // ---- capture mode: globally claim touch so 3+ finger gestures don't reach apps ----
+    // A hidden window registers as the system pointer-input target for PT_TOUCH while a
+    // 3+ finger gesture is in progress, so redirected touch is swallowed here instead of
+    // reaching the foreground app. The gesture host (via Node) sends "CAP 1" on engage and
+    // "CAP 0" on release. SAFETY: a 1.5s watchdog timer auto-releases if renews stop (host
+    // crash / lost release), so touch can never get stuck captured. Killing this process
+    // (owner-pid watch) also frees the registration immediately.
+    const int PT_TOUCH = 2;
     const uint WM_TIMER = 0x0113;
-    const uint WM_CAP_ON  = 0x8001;   // WM_APP+1
-    const uint WM_CAP_OFF = 0x8002;   // WM_APP+2
+    const uint WM_CAP_ON = 0x8001;   // WM_APP+1
+    const uint WM_CAP_OFF = 0x8002;  // WM_APP+2
     const uint WM_POINTER_FIRST = 0x0245, WM_POINTER_LAST = 0x0257;
-    const int  MAX_SLOTS = 10;
-
-    // POINTER_FLAG_*
-    const uint PF_NEW       = 0x00000001;
-    const uint PF_INRANGE   = 0x00000002;
-    const uint PF_INCONTACT = 0x00000004;
-    const uint PF_INJECTED  = 0x00000020;
-    const uint PF_DOWN      = 0x00010000;
-    const uint PF_UPDATE    = 0x00020000;
-    const uint PF_UP        = 0x00040000;
-
     static IntPtr _capHwnd = IntPtr.Zero;
     static bool _captured = false;
-    static bool _injectInitialized = false;
     static Native.WndProc _capProc;
-
-    // per-OS-pointer state: slot index + "policy" decided when the pointer went down.
-    // Once a pointer is decided as PASSTHROUGH (inject) we keep injecting it until it
-    // lifts, even if more fingers join (would otherwise leave the target app with a
-    // stuck pointer). Same the other way: a pointer started in DROP stays dropped.
-    class Slot { public byte injectId; public bool passthrough; public int x; public int y; }
-    static readonly System.Collections.Generic.Dictionary<uint, Slot> _slots
-        = new System.Collections.Generic.Dictionary<uint, Slot>();
-    static readonly bool[] _slotInUse = new bool[MAX_SLOTS];
-
-    static byte AllocSlot()
-    {
-        for (byte i = 0; i < MAX_SLOTS; i++) if (!_slotInUse[i]) { _slotInUse[i] = true; return i; }
-        return 0; // overflow — reuse 0 (rare; 10 simultaneous fingers)
-    }
-    static void FreeSlot(byte i) { if (i < MAX_SLOTS) _slotInUse[i] = false; }
 
     static void StartCaptureWindow()
     {
@@ -189,132 +117,22 @@ static class Program
         try { t.SetApartmentState(ApartmentState.STA); } catch { }
         t.Start();
     }
-
     static IntPtr CapProc(IntPtr h, uint msg, IntPtr w, IntPtr l)
     {
         if (msg == WM_CAP_ON)
         {
-            if (!_injectInitialized)
-            {
-                // initialize once; survives across CAP toggles
-                if (Native.InitializeTouchInjection(MAX_SLOTS, TOUCH_FEEDBACK_INDIRECT))
-                { _injectInitialized = true; Log("touch injection initialized"); }
-                else
-                { Log("InitializeTouchInjection FAILED err=" + Marshal.GetLastWin32Error()); }
-            }
-            if (!_captured && Native.RegisterPointerInputTarget(h, PT_TOUCH))
-            { _captured = true; Log("capture ON (always-on + reinject)"); }
-            Native.SetTimer(h, (IntPtr)1, 2000, IntPtr.Zero); // re-arm 2s watchdog on each renew
+            if (!_captured && Native.RegisterPointerInputTarget(h, PT_TOUCH)) { _captured = true; Log("capture ON"); }
+            Native.SetTimer(h, (IntPtr)1, 1500, IntPtr.Zero); // (re)arm watchdog
             return IntPtr.Zero;
         }
         if (msg == WM_CAP_OFF || msg == WM_TIMER)
         {
             if (_captured) { Native.UnregisterPointerInputTarget(h, PT_TOUCH); _captured = false; Log(msg == WM_TIMER ? "capture auto-release" : "capture OFF"); }
             Native.KillTimer(h, (IntPtr)1);
-            // drop any stale slot state — fresh start next time
-            _slots.Clear();
-            for (int i = 0; i < MAX_SLOTS; i++) _slotInUse[i] = false;
             return IntPtr.Zero;
         }
-
-        if (msg >= WM_POINTER_FIRST && msg <= WM_POINTER_LAST)
-        {
-            HandlePointerFrame((uint)(w.ToInt64() & 0xFFFF));
-            return IntPtr.Zero;
-        }
+        if (msg >= WM_POINTER_FIRST && msg <= WM_POINTER_LAST) return IntPtr.Zero; // swallow redirected touch
         return Native.DefWindowProcW(h, msg, w, l);
-    }
-
-    static void HandlePointerFrame(uint pointerId)
-    {
-        try
-        {
-            // Pull the whole frame (all simultaneous contacts grouped under this pointerId).
-            uint count = 0;
-            Native.GetPointerFrameTouchInfo(pointerId, ref count, null);
-            if (count == 0) return;
-            var frame = new Native.POINTER_TOUCH_INFO[count];
-            if (!Native.GetPointerFrameTouchInfo(pointerId, ref count, frame)) return;
-
-            // Filter out our own re-injected pointers so we don't loop forever.
-            int physN = 0;
-            for (int i = 0; i < count; i++)
-                if ((frame[i].pointerInfo.pointerFlags & PF_INJECTED) == 0) physN++;
-            if (physN == 0) return;
-
-            // Count current active non-injected contacts overall to decide whether new
-            // pointers should be passthrough or dropped. (Existing pointers retain their
-            // original decision so we never strand an injected pointer mid-touch.)
-            int activeAll = 0;
-            for (int i = 0; i < count; i++)
-            {
-                var pi = frame[i].pointerInfo;
-                if ((pi.pointerFlags & PF_INJECTED) != 0) continue;
-                if ((pi.pointerFlags & PF_UP) != 0) continue;  // about to lift
-                activeAll++;
-            }
-
-            // Build re-injection batch
-            var batch = new System.Collections.Generic.List<Native.POINTER_TOUCH_INFO>(physN);
-
-            for (int i = 0; i < count; i++)
-            {
-                var src = frame[i];
-                if ((src.pointerInfo.pointerFlags & PF_INJECTED) != 0) continue;
-
-                uint osId = src.pointerInfo.pointerId;
-                uint flags = src.pointerInfo.pointerFlags;
-                bool isNew = (flags & PF_NEW) != 0;
-                bool isUp  = (flags & PF_UP) != 0;
-
-                Slot slot;
-                if (isNew || !_slots.TryGetValue(osId, out slot))
-                {
-                    // New pointer — decide policy now
-                    bool passthrough = (activeAll < 3);
-                    slot = new Slot {
-                        injectId = passthrough ? AllocSlot() : (byte)255,
-                        passthrough = passthrough,
-                        x = src.pointerInfo.ptPixelLocation.x,
-                        y = src.pointerInfo.ptPixelLocation.y,
-                    };
-                    _slots[osId] = slot;
-                }
-                slot.x = src.pointerInfo.ptPixelLocation.x;
-                slot.y = src.pointerInfo.ptPixelLocation.y;
-
-                if (slot.passthrough)
-                {
-                    var pti = new Native.POINTER_TOUCH_INFO();
-                    pti.pointerInfo.pointerType = PT_TOUCH_PT;
-                    pti.pointerInfo.pointerId = slot.injectId;
-                    pti.pointerInfo.ptPixelLocation = src.pointerInfo.ptPixelLocation;
-                    if (isUp)
-                        pti.pointerInfo.pointerFlags = PF_UP;
-                    else if (isNew)
-                        pti.pointerInfo.pointerFlags = PF_INRANGE | PF_INCONTACT | PF_DOWN;
-                    else
-                        pti.pointerInfo.pointerFlags = PF_INRANGE | PF_INCONTACT | PF_UPDATE;
-                    pti.touchFlags = 0;
-                    pti.touchMask = 0;
-                    batch.Add(pti);
-                }
-
-                if (isUp)
-                {
-                    if (slot.passthrough) FreeSlot(slot.injectId);
-                    _slots.Remove(osId);
-                }
-            }
-
-            if (batch.Count > 0)
-            {
-                var arr = batch.ToArray();
-                if (!Native.InjectTouchInput((uint)arr.Length, arr))
-                    Log("InjectTouchInput failed n=" + arr.Length + " err=" + Marshal.GetLastWin32Error());
-            }
-        }
-        catch (Exception ex) { Log("frame error: " + ex.Message); }
     }
 
     static int Main(string[] args)
