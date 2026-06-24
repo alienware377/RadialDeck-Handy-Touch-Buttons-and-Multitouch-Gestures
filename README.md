@@ -1,4 +1,4 @@
-# RadialDeck — Multitouch Gesture Overlay for Windows
+# RadialDeck — Handy Touch Buttons and Multitouch Gesture Overlay for Windows
 
 **RadialDeck** is a free, open-source **touch gesture overlay** and **radial keyboard launcher** for Windows 10/11. Float customizable shortcut layouts over any app and fire them by touch, pen, or mouse — then add whole-screen multi-touch gestures (edge swipes, 3–5 finger swipes, pinch, rotate, custom drawn shapes) that trigger commands even when the deck is hidden.
 
