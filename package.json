@@ -1,7 +1,8 @@
 {
-  "name": "radialdeck",
+  "name": "radialdeck-multitouch-gestures",
   "version": "1.0.0",
-  "description": "RadialDeck — a radial virtual keyboard overlay for creators. Float shortcut layouts over any app and fire them by touch or pen.",
+  "description": "RadialDeck — multitouch gesture overlay and radial keyboard launcher for Windows. Whole-screen touch gesture engine (edge swipes, 3-5 finger gestures, pinch, rotate, custom shapes) plus a floating radial/grid shortcut deck for touchscreens, drawing tablets, and pen displays.",
+  "keywords": ["windows", "touch", "gesture", "multitouch", "radial-menu", "keyboard-overlay", "drawing-tablet", "touchscreen", "shortcut-launcher", "electron", "uiaccess", "pen-input", "stylus", "virtual-keyboard", "stream-deck-alternative"],
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",

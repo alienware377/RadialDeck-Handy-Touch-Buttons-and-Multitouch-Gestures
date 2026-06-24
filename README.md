@@ -1,8 +1,12 @@
-# RadialDeck
+# RadialDeck — Multitouch Gesture Overlay for Windows
 
-A radial / grid **virtual keyboard overlay** for Windows, built with Electron. Float customizable shortcut layouts over any app and fire them by touch, pen, or mouse — a BUGKEY-style on-screen control surface for creators.
+**RadialDeck** is a free, open-source **touch gesture overlay** and **radial keyboard launcher** for Windows 10/11. Float customizable shortcut layouts over any app and fire them by touch, pen, or mouse — then add whole-screen multi-touch gestures (edge swipes, 3–5 finger swipes, pinch, rotate, custom drawn shapes) that trigger commands even when the deck is hidden.
 
-![platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue) ![license](https://img.shields.io/badge/license-MIT-green)
+Built for **drawing tablet users**, **touchscreen PC users**, **digital artists**, **streamers**, and anyone who wants a [Stream Deck](https://www.elgato.com/stream-deck)-style controller without extra hardware.
+
+![platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![electron](https://img.shields.io/badge/built%20with-Electron-47848f)
+
+> **Keywords:** Windows touch gestures, multitouch gesture software, radial menu overlay, virtual keyboard shortcut launcher, drawing tablet gestures, touchscreen shortcuts, pen gesture Windows, 3-finger swipe Windows custom, edge swipe Windows, UIAccess overlay
 
 ---
 
