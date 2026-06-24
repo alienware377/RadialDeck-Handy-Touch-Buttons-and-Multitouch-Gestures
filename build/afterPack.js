@@ -5,7 +5,7 @@
 // drive higher-integrity (elevated, e.g. UAC-admin) windows — synthetic input from
 // a normal-rights process is otherwise blocked by Windows UIPI. UIAccess additionally
 // requires the exe be code-signed by a trusted cert AND live in a secure location
-// (Program Files); install-uiaccess.ps1 handles those two steps.
+// (Program Files); uiaccess-setup.ps1 handles those two steps.
 //
 // We surgically edit the EXISTING manifest (only flip uiAccess / add a trustInfo
 // block) so Electron's own settings — notably DPI awareness — stay intact.

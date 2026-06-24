@@ -7,6 +7,18 @@ const { Keyboard } = require('./keyboard');
 const { TouchTracker } = require('./touch');
 const { Gestures } = require('./gestures');
 
+// Safety net: this is a background overlay utility, not a foreground app — a stray async
+// error (e.g. a transient named-pipe EPIPE to the injector) must never pop Electron's
+// "A JavaScript error occurred in the main process" dialog and take the whole app down.
+// Log it and keep running; the keyboard/injector layer self-heals (reconnects).
+process.on('uncaughtException', (err) => {
+  try {
+    fs.appendFileSync(path.join(require('os').tmpdir(), 'RadialDeck-main.log'),
+      new Date().toISOString() + '  uncaught: ' + (err && err.stack || err) + '\n');
+  } catch {}
+});
+process.on('unhandledRejection', () => {});
+
 // ---- UIAccess + Chromium child-process workaround ----
 // With uiAccess="true" the exe gets a higher-integrity token, and Chromium's
 // out-of-process children can't spawn at that integrity:

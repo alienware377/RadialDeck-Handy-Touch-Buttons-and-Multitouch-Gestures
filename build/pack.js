@@ -3,7 +3,7 @@
 // needed). RadialDeck.exe stays at NORMAL integrity (default asInvoker manifest) so it
 // renders; the uiAccess privilege lives in a tiny separate C# exe (RadialDeckInput.exe)
 // compiled here with csc (embeds its own uiAccess manifest) and copied alongside it.
-// Output is normalized to dist/win-unpacked/ — what install-uiaccess.ps1 expects.
+// Output is normalized to dist/win-unpacked/ — what uiaccess-setup.ps1 expects.
 
 const path = require('path');
 const fs = require('fs');
@@ -64,5 +64,5 @@ function buildInjector() {
   fs.copyFileSync(injExe, path.join(FINAL, 'RadialDeckInput.exe'));
 
   console.log('Built (normal integrity) + injector bundled:', FINAL);
-  console.log('Next: run build\\install-uiaccess.ps1 as administrator (signs both exes).');
+  console.log('Next: run `npm run installer` to build the setup .exe (signs both exes), or run build\\uiaccess-setup.ps1 as administrator to sign in place.');
 })().catch((e) => { console.error(e); process.exit(1); });

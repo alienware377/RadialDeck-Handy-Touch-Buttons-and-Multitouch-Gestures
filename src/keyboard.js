@@ -250,41 +250,44 @@ class Keyboard {
     if (this._disposed || this.pipe || this._connecting) return;
     this._connecting = true;
     const sock = net.connect(PIPE_PATH);
-    sock.once('connect', () => {
+
+    // error + close share ONE idempotent teardown. Critically the listeners are .on()
+    // (PERSISTENT), not .once(): an async write failure (EPIPE — the injector pipe dropped,
+    // e.g. injector restart / owner-pid exit) emits 'error' on the socket. With .once() the
+    // first error consumed the handler, so the NEXT error had no listener and Node threw it
+    // as an uncaught exception, crashing the Electron main process ("A JavaScript error
+    // occurred in the main process: write EPIPE"). A persistent handler + the `settled` guard
+    // means a write error can never be uncaught and we just fall back to PS and reconnect.
+    let settled = false;
+    const fail = () => {
+      if (settled) return; settled = true;
+      this._connecting = false;
+      const wasLive = (this.pipe === sock); // a live pipe dropped vs a connect attempt failing
+      if (wasLive) this.pipe = null;        // stop routing writes to a dead pipe immediately
+      try { sock.destroy(); } catch {}
+      if (this._disposed) return;
+      if (wasLive) this._startPS();         // immediate normal-integrity stopgap while we recover
+      if (this.pipe || this._connTimer) return;
+      // Retry FOREVER (with backoff), never give up. On a cold boot the injector's first launch
+      // (Authenticode/cert-chain verification + .NET cold start) can take far longer than any
+      // fixed cap — and AV/disk contention can stretch it to minutes. If we stop retrying, the
+      // app silently sits on the normal-integrity PS fallback forever (UIPI then blocks elevated
+      // targets -> "scrolling broke again"). PS covers input the whole time, so a slow poll is
+      // invisible. Re-launch the injector periodically in case the first spawn lost the race.
+      const delay = wasLive ? 800 : (attempt < 40 ? 200 : (attempt < 80 ? 1000 : 3000));
+      const next = wasLive ? 0 : attempt + 1;
+      if (next > 0 && next % 20 === 0) this._ensureInjector();
+      this._connTimer = setTimeout(() => { this._connTimer = null; this._connect(next); }, delay);
+    };
+
+    sock.on('connect', () => {
       this._connecting = false;
       this.pipe = sock;
       this._stopPS();  // uiAccess injector takes over from the normal-integrity stopgap
       this._flush();
     });
-    sock.once('error', () => {
-      this._connecting = false;
-      try { sock.destroy(); } catch {}
-      if (this._disposed || this.pipe || this._connTimer) return;
-      // Retry FOREVER (with backoff), never give up. On a cold boot the injector's first
-      // launch (Authenticode/cert-chain verification + .NET cold start) can take far longer
-      // than the old 40s cap — and on a freshly-booted box AV/disk contention can stretch it
-      // to minutes. If we stop retrying, the app silently sits on the normal-integrity PS
-      // fallback forever (UIPI then blocks elevated targets -> "scrolling broke again" after
-      // a restart). PS covers input the whole time, so an indefinite slow poll is invisible.
-      // Also re-launch the injector periodically in case the first spawn lost the race.
-      const delay = attempt < 40 ? 200 : (attempt < 80 ? 1000 : 3000); // 0-8s fast, then 1s, then 3s
-      if (attempt > 0 && attempt % 20 === 0) this._ensureInjector();
-      this._connTimer = setTimeout(() => { this._connTimer = null; this._connect(attempt + 1); }, delay);
-    });
-    sock.once('close', () => {
-      this._connecting = false;
-      if (this.pipe !== sock) return;   // only react to OUR live pipe dropping (errors handled above)
-      this.pipe = null;
-      if (this._disposed) return;
-      this._startPS();                  // immediate stopgap while we recover
-      if (this._connTimer) return;
-      this._connTimer = setTimeout(() => {
-        this._connTimer = null;
-        if (this._disposed || this.pipe) return;
-        this._ensureInjector();
-        this._connect(0);
-      }, 800);
-    });
+    sock.on('error', fail);  // PERSISTENT: never let an async write EPIPE become uncaught
+    sock.on('close', fail);
   }
 
   _startPS() {
