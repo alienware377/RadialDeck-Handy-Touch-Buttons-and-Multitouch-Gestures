@@ -38,6 +38,7 @@ static class Native
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT r);
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
+    [DllImport("user32.dll")] public static extern int GetSystemMetrics(int nIndex);
     [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
     [DllImport("user32.dll")] public static extern bool RegisterTouchWindow(IntPtr hWnd, uint ulFlags);
     public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
@@ -74,10 +75,14 @@ static class Native
 static class Program
 {
     const string PIPE = "RadialDeckInput";
-    const uint MOUSEEVENTF_MOVE   = 0x0001;
-    const uint MOUSEEVENTF_WHEEL  = 0x0800;
-    const uint MOUSEEVENTF_HWHEEL = 0x1000;
-    const uint KEYEVENTF_KEYUP    = 0x0002;
+    const uint MOUSEEVENTF_MOVE     = 0x0001;
+    const uint MOUSEEVENTF_WHEEL    = 0x0800;
+    const uint MOUSEEVENTF_HWHEEL   = 0x1000;
+    const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
+    const uint MOUSEEVENTF_VIRTUALDESK = 0x4000;
+    const uint KEYEVENTF_KEYUP      = 0x0002;
+    // GetSystemMetrics indices for the virtual desktop (all monitors)
+    const int SM_XVIRTUALSCREEN = 76, SM_YVIRTUALSCREEN = 77, SM_CXVIRTUALSCREEN = 78, SM_CYVIRTUALSCREEN = 79;
 
     // wheel target captured by the most recent 'F' command
     static IntPtr _target = IntPtr.Zero;
@@ -279,13 +284,27 @@ static class Program
 
         if (cmd == "MV")
         {
-            // ABSOLUTE move (GetCursorPos + SetCursorPos), NOT relative mouse_event.
-            // Relative MOUSEEVENTF_MOVE is mangled by the pointer-speed slider and
-            // "Enhance pointer precision" acceleration -> a fast finger flick teleports
-            // the cursor "all over the place". SetCursorPos moves exactly dx/dy pixels.
+            // Move by dx/dy pixels using an ABSOLUTE injected mouse-move (SendInput-class via
+            // mouse_event with MOUSEEVENTF_ABSOLUTE|VIRTUALDESK). Two reasons over SetCursorPos:
+            //  1. Absolute (not relative) so it's NOT mangled by the pointer-speed slider /
+            //     "Enhance pointer precision" — a fast flick won't teleport the cursor around.
+            //  2. Unlike SetCursorPos (which just teleports the pointer), this emits a REAL
+            //     mouse-move INPUT event. Apps that build a drag from the input stream — text
+            //     selection in Windows Terminal/PowerShell, canvas drags, etc. — need genuine
+            //     move events between button-down and button-up; SetCursorPos moves don't count,
+            //     so click-and-drag silently failed in those apps.
             int dx = ToInt(p[1]), dy = ToInt(p[2]);
             Native.POINT cur;
-            if (Native.GetCursorPos(out cur)) Native.SetCursorPos(cur.x + dx, cur.y + dy);
+            if (!Native.GetCursorPos(out cur)) return;
+            int tx = cur.x + dx, ty = cur.y + dy;
+            int vx = Native.GetSystemMetrics(SM_XVIRTUALSCREEN), vy = Native.GetSystemMetrics(SM_YVIRTUALSCREEN);
+            int vw = Native.GetSystemMetrics(SM_CXVIRTUALSCREEN), vh = Native.GetSystemMetrics(SM_CYVIRTUALSCREEN);
+            if (vw <= 1 || vh <= 1) { Native.SetCursorPos(tx, ty); return; } // fallback
+            if (tx < vx) tx = vx; else if (tx > vx + vw - 1) tx = vx + vw - 1;
+            if (ty < vy) ty = vy; else if (ty > vy + vh - 1) ty = vy + vh - 1;
+            int nx = (int)(((long)(tx - vx) * 65535) / (vw - 1));
+            int ny = (int)(((long)(ty - vy) * 65535) / (vh - 1));
+            Native.mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK, nx, ny, 0, UIntPtr.Zero);
             return;
         }
         if (cmd == "MB") { Native.mouse_event((uint)ToInt(p[1]), 0, 0, 0, UIntPtr.Zero); return; }

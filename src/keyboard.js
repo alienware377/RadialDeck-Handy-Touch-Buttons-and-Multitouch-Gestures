@@ -97,6 +97,8 @@ public static class RD {
   [DllImport("user32.dll")]
   public static extern bool SetCursorPos(int X, int Y);
   [DllImport("user32.dll")]
+  public static extern int GetSystemMetrics(int nIndex);
+  [DllImport("user32.dll")]
   public static extern IntPtr WindowFromPoint(POINT p);
   [DllImport("user32.dll")]
   public static extern bool RegisterTouchWindow(IntPtr hWnd, uint ulFlags);
@@ -159,9 +161,21 @@ while($true){
       [RD]::RegisterTouchTree([IntPtr][Convert]::ToInt64($p[1],16))
       continue
     }
-    if($p[0] -eq 'MV'){ # ABSOLUTE cursor move (relative mouse_event is mangled by pointer accel -> erratic)
+    if($p[0] -eq 'MV'){ # ABSOLUTE injected move: no pointer-accel mangling AND a real move
+      # event so click-and-drag (terminal text selection etc.) registers, unlike SetCursorPos.
       $c = New-Object RD+POINT
-      if([RD]::GetCursorPos([ref]$c)){ [void][RD]::SetCursorPos($c.x + [int]$p[1], $c.y + [int]$p[2]) }
+      if([RD]::GetCursorPos([ref]$c)){
+        $tx=$c.x+[int]$p[1]; $ty=$c.y+[int]$p[2]
+        $vx=[RD]::GetSystemMetrics(76); $vy=[RD]::GetSystemMetrics(77)
+        $vw=[RD]::GetSystemMetrics(78); $vh=[RD]::GetSystemMetrics(79)
+        if($vw -le 1 -or $vh -le 1){ [void][RD]::SetCursorPos($tx,$ty) }
+        else {
+          if($tx -lt $vx){$tx=$vx} elseif($tx -gt $vx+$vw-1){$tx=$vx+$vw-1}
+          if($ty -lt $vy){$ty=$vy} elseif($ty -gt $vy+$vh-1){$ty=$vy+$vh-1}
+          $nx=[int]([int64]($tx-$vx)*65535/($vw-1)); $ny=[int]([int64]($ty-$vy)*65535/($vh-1))
+          [RD]::mouse_event([uint32]0xC001,$nx,$ny,0,[UIntPtr]::Zero) # MOVE|ABSOLUTE|VIRTUALDESK
+        }
+      }
       continue
     }
     if($p[0] -eq 'MB'){ [RD]::mouse_event([uint32]$p[1],0,0,0,[UIntPtr]::Zero); continue }            # raw button flag
