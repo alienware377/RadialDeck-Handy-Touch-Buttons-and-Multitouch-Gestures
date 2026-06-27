@@ -345,7 +345,7 @@ function gridItem(it, cell, gap, step, cols, rows) {
   if (it.type === 'group') inner += `<span class="folder">▸</span>`;
   if (it.type === 'scroll') inner += `<span class="tag">${it.axis === 'h' ? 'H' : 'V'}</span>`;
   if (it.type === 'touchpad') inner += `<span class="tag">${it.expand ? 'PAD▸' : 'PAD'}</span>`;
-  if (it.type === 'mousebtn') inner += `<span class="tag">${({ l: 'L', r: 'R', m: 'M' }[it.button] || 'L')}${(it.clicks || 1) > 1 ? '×' + it.clicks : ''}</span>`;
+  if (it.type === 'mousebtn') inner += `<span class="tag">${({ l: 'L', r: 'R', m: 'M' }[it.button] || 'L')}${it.mode === 'hold' ? '↓' : ((it.clicks || 1) > 1 ? '×' + it.clicks : '')}</span>`;
   if (it.type === 'key' && it.action && it.action !== 'press') inner += `<span class="tag">${it.action.slice(0, 3).toUpperCase()}</span>`;
   inner += `<span class="rsz"></span>`;
   el.innerHTML = inner;
@@ -440,7 +440,8 @@ function renderProps() {
   }
   if (it.type === 'mousebtn') {
     h += row('Button', `<select id="pButton"><option value="l">Left</option><option value="r">Right</option><option value="m">Middle</option></select>`);
-    h += row('Clicks', `<input type="number" id="pClicks" min="1" max="3" value="${it.clicks || 1}" />`);
+    h += row('Mode', `<select id="pMode"><option value="click">Click</option><option value="hold">Hold (press &amp; release)</option></select>`);
+    if ((it.mode || 'click') !== 'hold') h += row('Clicks', `<input type="number" id="pClicks" min="1" max="3" value="${it.clicks || 1}" />`);
   }
   if (it.type === 'touchpad') {
     h += `<div class="prow check"><input type="checkbox" id="pExpand" ${it.expand ? 'checked' : ''} /><label for="pExpand">Expand to full pad (drill-in)</label></div>`;
@@ -486,7 +487,7 @@ function renderProps() {
 
   if (it.type === 'key') $('pAction').value = it.action || 'press';
   if (it.type === 'scroll') $('pAxis').value = it.axis || 'v';
-  if (it.type === 'mousebtn') $('pButton').value = it.button || 'l';
+  if (it.type === 'mousebtn') { $('pButton').value = it.button || 'l'; $('pMode').value = it.mode || 'click'; }
 
   bindP('pLabel', 'input', (v) => { it.label = v; if (it.type === 'key') it.autoLabel = (v.trim() === ''); refreshItemVisual(); });
   if (it.type === 'key') {
@@ -502,7 +503,8 @@ function renderProps() {
   }
   if (it.type === 'mousebtn') {
     bindP('pButton', 'change', (v) => { it.button = v; refreshItemVisual(); });
-    bindP('pClicks', 'input', (v) => { it.clicks = clamp(+v || 1, 1, 3); refreshItemVisual(); });
+    bindP('pMode', 'change', (v) => { it.mode = v; renderProps(); refreshItemVisual(); });
+    if ((it.mode || 'click') !== 'hold') bindP('pClicks', 'input', (v) => { it.clicks = clamp(+v || 1, 1, 3); refreshItemVisual(); });
   }
   if (it.type === 'touchpad') {
     $('pExpand').addEventListener('change', (e) => { it.expand = e.target.checked; refreshItemVisual(); markDirty(); });

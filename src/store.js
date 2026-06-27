@@ -40,7 +40,7 @@ function touchpad(label, color, gx, gy, gw, gh, expand) {
 // mousebtn: { ..., button:'l|r|m', clicks }
 function mousebtn(label, button, color, gx, gy, gw, gh, clicks) {
   return { id: uid(), type: 'mousebtn', label: label || 'Click', button: button || 'l', color: color || '#5b8cff',
-    gx: gx || 0, gy: gy || 0, gw: gw || 1, gh: gh || 1, clicks: clicks || 1 };
+    gx: gx || 0, gy: gy || 0, gw: gw || 1, gh: gh || 1, mode: 'click', clicks: clicks || 1 };
 }
 
 // ---- GLOBAL gestures (independent of the on-screen deck) ----
@@ -180,7 +180,7 @@ function migrate(cfg) {
         if (it.naturalScroll == null) it.naturalScroll = false;
         if (it.expand == null) it.expand = false;
       }
-      if (it.type === 'mousebtn') { if (!it.button) it.button = 'l'; if (!it.clicks) it.clicks = 1; }
+      if (it.type === 'mousebtn') { if (!it.button) it.button = 'l'; if (!it.clicks) it.clicks = 1; if (!it.mode) it.mode = 'click'; }
       // existing keys keep their curated labels (Copy, Paste…): don't auto-rename them
       if (it.type === 'key' && it.autoLabel === undefined) it.autoLabel = false;
     });

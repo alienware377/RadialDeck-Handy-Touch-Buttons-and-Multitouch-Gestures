@@ -152,8 +152,18 @@ function renderGrid(lv, sz) {
       el = document.createElement('div');
       el.className = 'gkey interactive';
       el.style.background = `linear-gradient(160deg, ${shade(it.color, 18)}, ${it.color})`;
-      el.innerHTML = (RDIcons.html(it) || `<span>${esc(it.label || '')}</span>`) + `<span class="badge">${(it.button || 'l').toUpperCase()}${(it.clicks || 1) > 1 ? '×' + it.clicks : ''}</span>`;
-      el.addEventListener('pointerdown', (e) => { e.preventDefault(); flash(el); window.rd.tpButton('click', it.button || 'l', it.clicks || 1); });
+      const btn = it.button || 'l';
+      const mbBadge = it.mode === 'hold' ? btn.toUpperCase() + '↓'
+        : btn.toUpperCase() + ((it.clicks || 1) > 1 ? '×' + it.clicks : '');
+      el.innerHTML = (RDIcons.html(it) || `<span>${esc(it.label || '')}</span>`) + `<span class="badge">${mbBadge}</span>`;
+      if (it.mode === 'hold') {
+        // press-and-hold: button down while finger is on the key, up on release (like a hold key)
+        el.addEventListener('pointerdown', (e) => { e.preventDefault(); interacting++; el.classList.add('held'); window.rd.tpButton('down', btn); });
+        const up = () => { if (!el.classList.contains('held')) return; el.classList.remove('held'); interacting = Math.max(0, interacting - 1); window.rd.tpButton('up', btn); };
+        el.addEventListener('pointerup', up); el.addEventListener('pointerleave', up); el.addEventListener('pointercancel', up);
+      } else {
+        el.addEventListener('pointerdown', (e) => { e.preventDefault(); flash(el); window.rd.tpButton('click', btn, it.clicks || 1); });
+      }
     } else {
       el = document.createElement('div');
       el.className = 'gkey interactive';
@@ -225,6 +235,7 @@ function bindScroll(el, it) {
 // scroll (tap = right click). Three fingers = swipe gestures (tap = middle click).
 // All synthesized into real OS mouse events via the keyboard backend.
 const TP_SLOP = 8, TP_TAP_MS = 350, TP_DBL_MS = 320, TP_SCROLL_STEP = 16, TP_SWIPE_MIN = 45;
+const TP_DRAG_ARM_MS = 450; // window after a 1-finger tap in which a second tap+move starts a click-drag
 function centroid(m) {
   let x = 0, y = 0, n = 0;
   for (const p of m.values()) { x += p.x; y += p.y; n++; }
@@ -246,7 +257,7 @@ function bindTouchpad(el, it) {
     if (n === 1) {
       st.t0 = performance.now(); st.moved = false; st.gFired = false; st.swiped = false;
       st.fx = 0; st.fy = 0; st.sx = e.clientX; st.sy = e.clientY; st.mode = 'move';
-      if (st.armDrag && performance.now() - st.armDrag < TP_DBL_MS) { st.dragging = true; window.rd.tpButton('down', 'l'); }
+      if (st.armDrag && performance.now() - st.armDrag < TP_DRAG_ARM_MS) { st.dragging = true; window.rd.tpButton('down', 'l'); }
       st.armDrag = 0;
     } else if (n === 2) { st.mode = 'scroll'; st.sBegun = false; st.accX = 0; st.accY = 0; }
     else if (n >= 3) { st.mode = 'gesture'; st.sx = c.x; st.sy = c.y; }
