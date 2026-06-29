@@ -239,18 +239,31 @@ function broadcastConfig() {
   if (gesturesWin && !gesturesWin.isDestroyed()) gesturesWin.webContents.send('config', cfg);
 }
 
-function buildTray() {
-  let img = nativeImage.createFromPath(ICON);
-  if (!img.isEmpty()) img = img.resize({ width: 16, height: 16 });
-  try { tray = new Tray(img.isEmpty() ? nativeImage.createEmpty() : img); } catch { return; }
-  tray.setToolTip('RadialDeck');
+function startsAtLogin() {
+  try { return !!app.getLoginItemSettings().openAtLogin; } catch { return false; }
+}
+function setStartAtLogin(on) {
+  try { app.setLoginItemSettings({ openAtLogin: !!on, path: process.execPath }); } catch {}
+  refreshTrayMenu();
+}
+function refreshTrayMenu() {
+  if (!tray) return;
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Show / Hide overlay', click: toggleOverlay },
     { label: 'Edit layouts…', click: createEditor },
     { label: 'Edit gestures…', click: createGesturesWindow },
     { type: 'separator' },
+    { label: 'Start at boot', type: 'checkbox', checked: startsAtLogin(), click: (mi) => setStartAtLogin(mi.checked) },
+    { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
   ]));
+}
+function buildTray() {
+  let img = nativeImage.createFromPath(ICON);
+  if (!img.isEmpty()) img = img.resize({ width: 16, height: 16 });
+  try { tray = new Tray(img.isEmpty() ? nativeImage.createEmpty() : img); } catch { return; }
+  tray.setToolTip('RadialDeck');
+  refreshTrayMenu();
   tray.on('click', toggleOverlay);
 }
 
