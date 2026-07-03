@@ -330,18 +330,6 @@ class Gestures {
   }
 
   _frame(t, pts) {
-    // Ghost watchdog: the panel intermittently reports phantom extra contacts, which turn
-    // one-finger swipes into two-finger pans (the "keyboard glide scrolls the app below" /
-    // janky-scroll bug). Log the START of every multi-contact episode with coords so a felt
-    // bug moment can be correlated against this file after the fact.
-    if (pts.size >= 2 && (this._lastN || 0) < 2) {
-      try {
-        const coords = Array.from(pts.entries()).map(([id, p]) => `${id}:${Math.round(p.x)},${Math.round(p.y)}`).join(' ');
-        fs.appendFileSync(path.join(os.tmpdir(), 'RadialDeck-ghost.log'),
-          new Date().toISOString() + ' multi-contact n=' + pts.size + ' ' + coords + '\n');
-      } catch {}
-    }
-    this._lastN = pts.size;
     this._updateCapture(pts.size);
     if (pts.size > 0) {
       this.active = true;
