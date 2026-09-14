@@ -241,6 +241,31 @@ function broadcastConfig() {
   if (gesturesWin && !gesturesWin.isDestroyed()) gesturesWin.webContents.send('config', cfg);
 }
 
+// ---------- external edits to config.json ----------
+// Another app (Lasso's gesture hand-off) can append bindings to our config while we run.
+// Watch the file and fold them in live, so they work immediately instead of only after a
+// restart — and so they're in memory before our next save rewrites the file.
+let cfgWatcher = null, cfgPullTimer = null;
+function pullExternalConfig() {
+  if (!cfg) return;
+  let changed = 0;
+  try { changed = store.adoptExternalGestures(cfg); } catch { return; }
+  if (!changed) return;
+  broadcastConfig(); startGestures();
+}
+function watchConfigFile() {
+  const file = store.configPath();
+  try {
+    // watch the DIRECTORY: the config is replaced by rename (atomic write), which kills a
+    // watch on the file itself after the first change.
+    cfgWatcher = fs.watch(path.dirname(file), (_ev, name) => {
+      if (name && name !== path.basename(file)) return;
+      clearTimeout(cfgPullTimer);
+      cfgPullTimer = setTimeout(pullExternalConfig, 400);   // let the writer finish
+    });
+  } catch {}
+}
+
 function startsAtLogin() {
   try { return !!app.getLoginItemSettings().openAtLogin; } catch { return false; }
 }
@@ -381,7 +406,19 @@ ipcMain.on('hide-overlay', () => { if (overlayWin) overlayWin.hide(); });
 // Save ONLY the gesture config (avoids clobbering layout edits made in the other window).
 ipcMain.on('save-gestures', (_e, payload) => {
   if (!cfg) return;
-  if (payload && Array.isArray(payload.gestures)) cfg.gestures = payload.gestures;
+  if (payload && Array.isArray(payload.gestures)) {
+    // The window may have loaded before another app added its bindings. Only ids it was
+    // actually showing count as deletions; anything it never saw is carried over, so a
+    // stale editor can't quietly wipe Lasso's gestures.
+    const sent = payload.gestures;
+    const known = Array.isArray(payload.knownIds) ? new Set(payload.knownIds) : null;
+    const have = new Set(sent.map((g) => g && g.id));
+    const carried = known
+      ? (cfg.gestures || []).filter((g) => g && g.id && !have.has(g.id) && !known.has(g.id))
+      : [];
+    store.noteGestureEdit((cfg.gestures || []).filter((g) => !known || known.has(g && g.id)), sent);
+    cfg.gestures = sent.concat(carried);
+  }
   if (payload && payload.gestureSettings) cfg.gestureSettings = payload.gestureSettings;
   store.save(cfg); broadcastConfig(); startGestures();
 });
@@ -462,11 +499,12 @@ if (!gotLock) {
     createOverlay();
     startAppPointTracking();
     startGestures();
+    watchConfigFile();
     buildTray();
     globalShortcut.register('Control+Alt+Space', toggleOverlay);
     globalShortcut.register('Control+Alt+E', createEditor);
   });
 
-  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (kb) kb.dispose(); if (touch) touch.dispose(); if (gestures) gestures.stop(); hideCursorWin(); });
+  app.on('will-quit', () => { if (cfgWatcher) { try { cfgWatcher.close(); } catch {} } globalShortcut.unregisterAll(); if (kb) kb.dispose(); if (touch) touch.dispose(); if (gestures) gestures.stop(); hideCursorWin(); });
   app.on('window-all-closed', () => { /* stay alive in tray */ });
 }

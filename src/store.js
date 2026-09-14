@@ -226,6 +226,56 @@ function hasGestureToggle(items) {
 }
 function walk(items, fn) { for (const it of items) { fn(it); if (it.items) walk(it.items, fn); } }
 
+// ---- foreign gestures (written into our config by ANOTHER app) ----
+// Lasso's hand-off appends its bindings straight into this file, id-prefixed "lasso:".
+// We hold the whole config in memory from boot and rewrite it on every little change
+// (moving the deck, switching layout...), so without this those appended bindings were
+// silently erased seconds later and looked like "the import never loaded".
+// Rule: an id with a namespace prefix ("app:whatever") is owned by that app — the file on
+// disk wins for those, always. Ids we have seen and the user then deleted here stay deleted.
+const seenGestureIds = new Set();
+const deletedGestureIds = new Set();
+function isForeignId(id) { return /^[a-z][a-z0-9_.-]*:/i.test(String(id || '')); }
+function rememberGestures(cfg) {
+  for (const g of (cfg && cfg.gestures) || []) if (g && g.id) seenGestureIds.add(g.id);
+}
+// Call before replacing cfg.gestures with a user edit, so a deliberate delete sticks.
+function noteGestureEdit(prev, next) {
+  const now = new Set((next || []).map((g) => g && g.id));
+  for (const g of prev || []) if (g && g.id && !now.has(g.id)) deletedGestureIds.add(g.id);
+}
+// Fold whatever another app wrote into `cfg.gestures`. Returns how many entries changed.
+function mergeForeign(cfg, disk) {
+  if (!cfg || !Array.isArray(cfg.gestures) || !disk || !Array.isArray(disk.gestures)) return 0;
+  const byId = new Map(cfg.gestures.map((g) => [g && g.id, g]));
+  const onDisk = new Map(disk.gestures.map((g) => [g && g.id, g]));
+  let changed = 0;
+  for (const [id, g] of onDisk) {
+    if (!id || deletedGestureIds.has(id)) continue;
+    const mine = byId.get(id);
+    if (!mine) {
+      // brand new to us: adopt it (a namespaced id, or one a second instance added)
+      if (isForeignId(id) || !seenGestureIds.has(id)) { cfg.gestures.push(g); changed++; }
+    } else if (isForeignId(id) && JSON.stringify(mine) !== JSON.stringify(g)) {
+      Object.assign(mine, g); changed++;      // the owning app re-synced: take its version
+    }
+  }
+  // the owning app removed its bindings (Lasso's hand-off toggled off)
+  for (let i = cfg.gestures.length - 1; i >= 0; i--) {
+    const g = cfg.gestures[i];
+    if (g && isForeignId(g.id) && seenGestureIds.has(g.id) && !onDisk.has(g.id)) {
+      cfg.gestures.splice(i, 1); changed++;
+    }
+  }
+  rememberGestures(cfg);
+  return changed;
+}
+// Pull in external changes without writing anything (used by the config watcher).
+function adoptExternalGestures(cfg) {
+  const cur = tryRead(configPath());
+  return cur.state === 'ok' ? mergeForeign(cfg, cur.cfg) : 0;
+}
+
 function backupPath() { return configPath() + '.bak'; }
 function isValid(cfg) { return !!(cfg && Array.isArray(cfg.layouts) && cfg.layouts.length); }
 
@@ -278,7 +328,11 @@ function applySeed(cfg) {
 
 function load() {
   const main = tryRead(configPath());
-  if (main.state === 'ok') return applySeed(migrate(main.cfg));
+  if (main.state === 'ok') {
+    const cfg = applySeed(migrate(main.cfg));
+    rememberGestures(cfg);
+    return cfg;
+  }
 
   // Primary unusable. Try the rotating backup before EVER falling back to defaults — a
   // corrupt/locked primary must not cost the user their layouts.
@@ -304,7 +358,10 @@ function save(cfg) {
     // Preserve the current good config as the backup BEFORE overwriting. Only rotate when
     // the existing file is itself valid, so a single bad/defaults save can't poison the bak.
     const cur = tryRead(file);
-    if (cur.state === 'ok') { try { fs.copyFileSync(file, backupPath()); } catch {} }
+    if (cur.state === 'ok') {
+      try { fs.copyFileSync(file, backupPath()); } catch {}
+      mergeForeign(cfg, cur.cfg);   // keep bindings another app appended after we loaded
+    }
     // Atomic write: temp file -> fsync -> rename. A crash/power-loss mid-write (e.g. the PC
     // restart that started all this) then can't leave a truncated config.json.
     const tmp = file + '.tmp';
@@ -313,7 +370,14 @@ function save(cfg) {
     finally { fs.closeSync(fd); }
     fs.renameSync(tmp, file);
     return true;
-  } catch { return false; }
+  } catch (e) {
+    // A save that fails silently is invisible until the user loses work, so leave a trace.
+    try {
+      fs.appendFileSync(path.join(require('os').tmpdir(), 'RadialDeck-main.log'),
+        new Date().toISOString() + '  config save FAILED: ' + (e && e.stack || e) + '\n');
+    } catch {}
+    return false;
+  }
 }
 
-module.exports = { load, save, defaultConfig, configPath, uid };
+module.exports = { load, save, defaultConfig, configPath, uid, adoptExternalGestures, noteGestureEdit };
