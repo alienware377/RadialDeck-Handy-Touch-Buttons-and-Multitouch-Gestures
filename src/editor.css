@@ -20,7 +20,12 @@ header {
 .globals label { display: flex; align-items: center; gap: 6px; }
 .globals input[type=range] { accent-color: var(--accent); }
 .hbtn { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
-  width: 30px; height: 28px; border-radius: 7px; font-size: 15px; line-height: 1; cursor: pointer; }
+  min-width: 30px; height: 28px; padding: 0 6px; border-radius: 7px; font-size: 15px;
+  line-height: 1; cursor: pointer; white-space: nowrap; flex: none; }
+/* text buttons (e.g. "Gestures…") need room; the icon ones stay square */
+#btnGestures { font-size: 12px; padding: 0 10px; }
+.globals { flex-wrap: wrap; justify-content: flex-end; }
+#saveState { flex: none; }
 .hbtn:hover:not(:disabled) { background: var(--line); }
 .hbtn:disabled { opacity: .4; cursor: default; }
 #saveState { font-size: 11px; padding: 3px 9px; border-radius: 8px; background: var(--panel2); }

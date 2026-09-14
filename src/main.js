@@ -6,6 +6,7 @@ const store = require('./store');
 const { Keyboard } = require('./keyboard');
 const { TouchTracker } = require('./touch');
 const { Gestures } = require('./gestures');
+const { CloseStack } = require('./closestack');
 
 // Safety net: this is a background overlay utility, not a foreground app — a stray async
 // error (e.g. a transient named-pipe EPIPE to the injector) must never pop Electron's
@@ -42,6 +43,7 @@ let kb = null;
 let cfg = null;
 let touch = null;
 let gestures = null;
+const closeStack = new CloseStack({ log: (m) => { try { fs.appendFileSync(path.join(require('os').tmpdir(), 'RadialDeck-close.log'), new Date().toISOString().slice(11, 23) + ' ' + m + '\n'); } catch {} } });
 
 // ---- synthetic cursor (Windows hides the real arrow while a finger is touching,
 // so during touchpad use we draw our own sprite that tracks the injected cursor) ----
@@ -276,7 +278,16 @@ function toggleOverlay() {
 // ---------- IPC ----------
 ipcMain.handle('get-config', () => cfg);
 
-ipcMain.on('save-config', (_e, newCfg) => { cfg = newCfg; store.save(cfg); broadcastConfig(); startGestures(); });
+ipcMain.on('save-config', (_e, newCfg) => {
+  // The layout editor sends a whole-config snapshot taken when it opened. Keep its layout
+  // edits but DON'T let its stale copy clobber gestures the gesture editor saved meanwhile —
+  // that silently deleted user gestures. Gestures are owned by 'save-gestures' only.
+  const keepG = cfg && cfg.gestures, keepS = cfg && cfg.gestureSettings;
+  cfg = newCfg;
+  if (keepG) cfg.gestures = keepG;
+  if (keepS) cfg.gestureSettings = keepS;
+  store.save(cfg); broadcastConfig(); startGestures();
+});
 
 ipcMain.on('set-active-layout', (_e, idx) => { cfg.activeLayout = idx; store.save(cfg); broadcastConfig(); });
 
@@ -397,12 +408,23 @@ function rdControl(verb) {
     case 'hide-deck': if (overlayWin && !overlayWin.isDestroyed()) overlayWin.hide(); break;
     case 'next-layout': switchLayout(1); break;
     case 'prev-layout': switchLayout(-1); break;
+    case 'close-remember':
+      // snapshot what's in front, THEN close it
+      closeStack.capture(() => { if (kb) kb.press('ctrl+w'); });
+      break;
+    case 'reopen-last': {
+      const br = closeStack.reopenLast();
+      // a browser restores its own tab — give it a moment to be frontmost, then Ctrl+Shift+T
+      if (br && kb) setTimeout(() => kb.press('ctrl+shift+t'), 120);
+      break;
+    }
   }
 }
 function fireGesture(b) {
   if (!b) return;
   if (b.action === 'command') runCommand(b.combo);
   else if (b.action === 'rd-control') rdControl(b.combo);
+  else if (b.action === 'mouse') { if (kb) kb.mouseButton('click', b.combo || 'r', 1); }
   else if (kb) kb.press(b.combo); // 'press' (keystroke combo)
 }
 function gesturesEnabled() { return !(cfg && cfg.gestureSettings && cfg.gestureSettings.enabled === false); }
@@ -416,6 +438,10 @@ function startGestures() {
     });
   }
   if (gesturesEnabled()) gestures.start(); else gestures.stop();
+  // Right-button drag gestures: only hook the mouse when the engine is on AND at least one
+  // enabled 'rclick' binding exists, so right-click is never touched unless it's actually used.
+  const want = gesturesEnabled() && ((cfg && cfg.gestures) || []).some((b) => b.enabled !== false && b.kind === 'rclick');
+  if (gestures) gestures.setMouseGestures(want);
 }
 
 // ---------- lifecycle ----------

@@ -242,7 +242,10 @@ class Gestures {
     this._stopped = false;
   }
 
-  log(m) { try { if (this.opts.log) this.opts.log(m); } catch {} }
+  log(m) {
+    try { if (this.opts.log) this.opts.log(m); } catch {}
+    try { fs.appendFileSync(path.join(os.tmpdir(), 'RadialDeck-gestures.log'), new Date().toISOString().slice(11, 23) + ' ' + m + '\n'); } catch {}
+  }
 
   start() {
     if (this.proc) return;
@@ -274,8 +277,83 @@ class Gestures {
     this.log('gesture host started');
   }
 
+  // ---- right-button drag gestures (separate normal-integrity hook host) ----
+  // RDMouseHook.exe owns the WH_MOUSE_LL hook. It is deliberately NOT the uiAccess injector:
+  // a global mouse hook is synchronous, so a wedged owner tarpits all desktop input, and a
+  // uiAccess process can't be killed to recover. This one can.
+  setMouseGestures(on) {
+    if (on) this._startMouseHook(); else this._stopMouseHook();
+  }
+  _mouseHookPath() {
+    const cands = [
+      path.join(path.dirname(process.execPath), 'RDMouseHook.exe'),
+      path.join(__dirname, '..', 'build', 'mousehook', 'RDMouseHook.exe'),
+    ];
+    for (const c of cands) {
+      try {
+        if (!fs.existsSync(c)) continue;
+        // Never run the input helper off a cloud/network drive: a cold page fault there is a
+        // network round-trip, which used to be an unbounded stall inside the input path.
+        const root = path.parse(path.resolve(c)).root.toUpperCase();
+        if (root && root[0] !== 'C') { this.log('skipping helper on non-local drive ' + root); continue; }
+        return c;
+      } catch {}
+    }
+    return null;
+  }
+  _startMouseHook() {
+    if (this.mhProc) return;
+    // Restart limiter: if the helper keeps dying, stop relaunching it rather than spinning up
+    // an endless string of input-layer processes.
+    this._mhFails = this._mhFails || 0;
+    if (this._mhFails >= 3) { this.log('mouse helper disabled after repeated failures'); return; }
+    const exe = this._mouseHookPath();
+    if (!exe) { this.log('RDMouseHook.exe not found'); return; }
+    // Launch THROUGH RDJob so the helper sits in a Job Object with KILL_ON_JOB_CLOSE — the
+    // kernel reaps it if RadialDeck is force-killed, so it can never be left orphaned owning
+    // an input registration.
+    const jobExe = path.join(path.dirname(exe), 'RDJob.exe');
+    let cmd = exe, cmdArgs = [String(process.pid)];
+    try { if (fs.existsSync(jobExe)) { cmd = jobExe; cmdArgs = [exe, String(process.pid)]; } } catch {}
+    let child;
+    try { child = spawn(cmd, cmdArgs, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }); }
+    catch (e) { this._mhFails++; this.log('mouse helper spawn failed: ' + e); return; }
+    this.mhProc = child;
+    child.on('error', (e) => { this._mhFails++; this.log('mouse helper error: ' + e); });
+    let buf = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (d) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        if (line === 'READY') { this.log('mouse hook ready'); continue; }
+        if (line.startsWith('MG ')) {
+          const pts = line.slice(3).split(' ').map((s) => { const a = s.split(','); return { x: +a[0], y: +a[1] }; })
+            .filter((p) => isFinite(p.x) && isFinite(p.y));
+          if (pts.length > 1) this.mouseGesture(pts);
+        }
+      }
+    });
+    child.stderr.on('data', (d) => this.log('mouse helper stderr: ' + d));
+    // identity-checked: a late exit from an OLD child must not clear a NEW one's handle
+    child.on('exit', (c) => {
+      if (this.mhProc === child) this.mhProc = null;
+      if (c !== 0 && c !== null) this._mhFails++;
+      this.log('mouse helper exited ' + c);
+    });
+    this.log('mouse helper started (raw input)');
+  }
+  _stopMouseHook() {
+    if (!this.mhProc) return;
+    const p = this.mhProc; this.mhProc = null;
+    try { p.kill(); } catch {}
+    this.log('mouse hook stopped');
+  }
+
   stop() {
     this._stopped = true;
+    this._stopMouseHook();
     if (this._capActive) { this._capActive = false; this._sendCapture(false); } // release touch
     if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
     if (this.proc) { try { this.proc.kill(); } catch {} this.proc = null; }
@@ -369,6 +447,34 @@ class Gestures {
     const g = this._analyze(frames);
     if (!g) return;
 
+    // Double-tap: a tap that lands soon after, and near, a previous tap with the same
+    // finger count. Promote it so a 'double-tap' binding can match instead of 'tap'.
+    if (g.kind === 'tap') {
+      const S = this._settings();
+      const c = g.centroidPath[g.centroidPath.length - 1];
+      const prev = this._lastTap;
+      const gap = S.doubleTapMs || 400;
+      const near = (S.tapMaxPx || 30) * 2.5;
+      if (prev && prev.fingers === g.fingers && (Date.now() - prev.t) <= gap &&
+          Math.hypot(c.x - prev.x, c.y - prev.y) <= near) {
+        g.kind = 'double-tap';
+        this._lastTap = null;                        // consume, so a 3rd tap starts fresh
+      } else {
+        this._lastTap = { t: Date.now(), x: c.x, y: c.y, fingers: g.fingers };
+        // hold the single tap briefly in case a second one turns it into a double
+        if (this._bindings().some((b) => b.enabled !== false && b.kind === 'double-tap' && (b.fingers || 1) === g.fingers)) {
+          const pending = g;
+          if (this._tapTimer) clearTimeout(this._tapTimer);
+          this._tapTimer = setTimeout(() => { this._tapTimer = null; this._dispatch(pending); }, gap);
+          return;
+        }
+      }
+      if (this._tapTimer) { clearTimeout(this._tapTimer); this._tapTimer = null; }
+    }
+    this._dispatch(g);
+  }
+
+  _dispatch(g) {
     const now = Date.now();
     const settings = this._settings();
     if (now - this.lastFire < (settings.cooldownMs || 350)) return;
@@ -494,17 +600,44 @@ class Gestures {
   }
 
   // Find an enabled binding matching this gesture descriptor.
+  // Right-button drag path from the injector -> classify as a direction or a drawn shape,
+  // then run it through the normal binding match. fingers is always 1 for mouse gestures.
+  mouseGesture(points) {
+    if (!points || points.length < 2) return;
+    this.log('rclick path pts=' + points.length + ' from ' + JSON.stringify(points[0]) + ' to ' + JSON.stringify(points[points.length - 1]));
+    const S = this._settings();
+    const a = points[0], z = points[points.length - 1];
+    const net = { x: z.x - a.x, y: z.y - a.y };
+    const straightLen = Math.hypot(net.x, net.y);
+    const pLen = pathLength(points) || 0.0001;
+    const g = { fingers: 1, kind: 'rclick', dir: null, shape: null, centroidPath: points };
+    if (straightLen / pLen >= 0.80 && straightLen >= (S.minSwipePx || 110) * 0.5) {
+      g.dir = Math.abs(net.x) >= Math.abs(net.y) ? (net.x > 0 ? 'right' : 'left') : (net.y > 0 ? 'down' : 'up');
+    } else {
+      let best = null, bestScore = 0;
+      for (const name in BUILTIN_SHAPES) {
+        const sc = cloudScore(points, BUILTIN_SHAPES[name]);
+        if (sc > bestScore) { bestScore = sc; best = name; }
+      }
+      if (best && bestScore >= (S.pathMinScore || 0.80)) g.shape = best;
+      else { this.log('rclick: no dir/shape match (best ' + best + ' ' + bestScore.toFixed(2) + ')'); return; }
+    }
+    this.log('rclick classified dir=' + g.dir + ' shape=' + g.shape + ' match=' + !!this._match(g));
+    this._dispatch(g);
+  }
+
   _match(g) {
     for (const b of this._bindings()) {
       if (!b.enabled) continue;
       if (b.kind !== g.kind) continue;
       if (b.fingers !== g.fingers) continue;
-      if (g.kind === 'tap') return b;
+      if (g.kind === 'tap' || g.kind === 'double-tap') return b;
       if (g.kind === 'edge' || g.kind === 'swipe' || g.kind === 'pinch' || g.kind === 'rotate') {
         if (b.dir === g.dir) return b;
       }
       if (g.kind === 'path') { if (b.shape === g.shape) return b; }
       if (g.kind === 'custom') { if (b.id === g.templateId) return b; }
+      if (g.kind === 'rclick') { if ((b.shape || 'dir') === 'dir' ? b.dir === g.dir : b.shape === g.shape) return b; }
     }
     return null;
   }

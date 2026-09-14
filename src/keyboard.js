@@ -300,6 +300,7 @@ class Keyboard {
       this._stopPS();  // uiAccess injector takes over from the normal-integrity stopgap
       this._flush();
     });
+    sock.on('data', () => {});  // injector never replies; drain so the socket can't stall
     sock.on('error', fail);  // PERSISTENT: never let an async write EPIPE become uncaught
     sock.on('close', fail);
   }
@@ -436,6 +437,7 @@ class Keyboard {
   // touch input, so 3+ finger gestures don't also reach the app underneath. The injector
   // auto-releases after ~1.5s if engage isn't renewed (watchdog), so this can't get stuck.
   setCapture(on) { this._send('CAP ' + (on ? '1' : '0')); }
+
 
   // ---- touchpad: move the system cursor relatively, and click mouse buttons ----
   mouseMove(dx, dy) {

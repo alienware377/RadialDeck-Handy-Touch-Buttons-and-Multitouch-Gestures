@@ -88,6 +88,7 @@ function defaultGestureSettings() {
     minSwipePx: 110,      // min centroid travel to count as a swipe/path
     tapMaxPx: 30,         // max centroid movement still considered a tap
     tapMaxMs: 320,        // max duration for a tap
+    doubleTapMs: 400,     // max gap between two taps to count as a double tap
     rotateMinDeg: 35,     // min orbit angle for a rotate
     pinchMinRatio: 0.72,  // mean-radius end/start <= this => pinch IN (>= 1/ratio => OUT)
     pathMinScore: 0.80,   // $P recognizer confidence floor (0..1)
@@ -204,6 +205,17 @@ function migrate(cfg) {
       if (target) { if (!Array.isArray(target.items)) target.items = []; target.items.push(key('Gestures', '', 'gesture-toggle', '#9b6cff')); }
     }
     cfg._gtSeeded = true;
+  }
+  // Right-drag close/reopen presets. ADDITIVE and shipped DISABLED: we only ever append, and
+  // only if the user hasn't already got one with that id, so an update never disturbs or
+  // replaces gestures the user made themselves.
+  for (const preset of [
+    gbind({ id: 'rd_rclick_close', kind: 'rclick', fingers: 1, dir: 'down', shape: 'dir',
+      action: 'rd-control', combo: 'close-remember', enabled: false, name: 'Right-drag down → Close & remember' }),
+    gbind({ id: 'rd_rclick_reopen', kind: 'rclick', fingers: 1, dir: 'up', shape: 'dir',
+      action: 'rd-control', combo: 'reopen-last', enabled: false, name: 'Right-drag up → Reopen last closed' }),
+  ]) {
+    if (!cfg.gestures.some((g) => g.id === preset.id)) cfg.gestures.push(preset);
   }
   return cfg;
 }

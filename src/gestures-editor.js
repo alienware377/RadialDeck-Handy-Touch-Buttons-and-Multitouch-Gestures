@@ -14,13 +14,21 @@ const DIRS = {
   swipe: [['up', 'Up'], ['down', 'Down'], ['left', 'Left'], ['right', 'Right']],
   pinch: [['in', 'Pinch in'], ['out', 'Pinch out']],
   rotate: [['cw', 'Clockwise'], ['ccw', 'Counter-clockwise']],
+  // right-button drag: straight directions, or pick a drawn shape below
+  rclick: [['up', 'Drag up'], ['down', 'Drag down'], ['left', 'Drag left'], ['right', 'Drag right'], ['__shape', 'Draw a shape…']],
 };
-const KIND_LABEL = { edge: 'Edge', swipe: 'Swipe', tap: 'Tap', pinch: 'Pinch', rotate: 'Rotate', path: 'Path', custom: 'Custom' };
-const VERB_LABEL = { 'toggle-deck': 'Show/hide deck', 'show-deck': 'Show deck', 'hide-deck': 'Hide deck', 'next-layout': 'Next layout', 'prev-layout': 'Prev layout', 'collapse-toggle': 'Collapse' };
+const KIND_LABEL = { edge: 'Edge', swipe: 'Swipe', tap: 'Tap', 'double-tap': 'Double tap', pinch: 'Pinch', rotate: 'Rotate', path: 'Path', custom: 'Custom', rclick: 'Right-drag' };
+const VERB_LABEL = { 'toggle-deck': 'Show/hide deck', 'show-deck': 'Show deck', 'hide-deck': 'Hide deck', 'next-layout': 'Next layout', 'prev-layout': 'Prev layout', 'collapse-toggle': 'Collapse', 'close-remember': 'Close & remember', 'reopen-last': 'Reopen last closed' };
 const SHAPE_LABEL = { circle: 'Circle', 'half-circle': 'Half circle', s: 'S', 's-side': 'Sideways S', figure8: 'Figure 8' };
 
 function gid() { return 'g' + Math.random().toString(36).slice(2, 9); }
-function markDirty() { dirty = true; const s = $('saveState'); s.textContent = 'unsaved'; s.classList.add('dirty'); }
+let autoSaveTimer = null;
+function markDirty() {
+  dirty = true; const s = $('saveState'); s.textContent = 'unsaved'; s.classList.add('dirty');
+  // Autosave: never lose edits if the window is closed or the app is killed mid-edit.
+  if (autoSaveTimer) clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => { autoSaveTimer = null; if (dirty) save(); }, 800);
+}
 function markSaved() { dirty = false; const s = $('saveState'); s.textContent = 'saved'; s.classList.remove('dirty'); }
 
 // ---------- describe a binding ----------
@@ -80,11 +88,13 @@ function syncFields() {
   const kind = $('edKind').value;
   const action = $('edAction').value;
   $('edDirWrap').classList.toggle('hidden', !DIRS[kind]);
-  $('edShapeWrap').classList.toggle('hidden', kind !== 'path');
+  // right-drag picks a shape only when its direction is set to "Draw a shape…"
+  const rcShape = (kind === 'rclick' && $('edDir').value === '__shape');
+  $('edShapeWrap').classList.toggle('hidden', kind !== 'path' && !rcShape);
   $('recWrap').classList.toggle('hidden', kind !== 'custom');
-  // edge gestures are 1-finger
-  $('edFingers').disabled = (kind === 'edge');
-  if (kind === 'edge') $('edFingers').value = '1';
+  // edge and right-drag gestures are single-pointer
+  $('edFingers').disabled = (kind === 'edge' || kind === 'rclick');
+  if (kind === 'edge' || kind === 'rclick') $('edFingers').value = '1';
   $('edComboWrap').classList.toggle('hidden', action === 'rd-control');
   $('edVerbWrap').classList.toggle('hidden', action !== 'rd-control');
   $('edComboLabel').textContent = action === 'command' ? 'Command / app to launch' : 'Keys';
@@ -98,7 +108,8 @@ function openEditor(index) {
   $('edName').value = draft.name || '';
   $('edKind').value = draft.kind;
   $('edFingers').value = String(draft.fingers || 3);
-  fillDirs(draft.kind, draft.dir);
+  // a saved right-drag shape binding has no dir — reselect the "Draw a shape…" entry
+  fillDirs(draft.kind, (draft.kind === 'rclick' && !draft.dir) ? '__shape' : draft.dir);
   $('edShape').value = draft.shape || 'circle';
   $('edAction').value = draft.action || 'press';
   if (draft.action === 'rd-control') $('edVerb').value = draft.combo || 'toggle-deck';
@@ -119,9 +130,14 @@ function applyEditor() {
   const kind = $('edKind').value;
   draft.name = $('edName').value.trim() || autoName();
   draft.kind = kind;
-  draft.fingers = kind === 'edge' ? 1 : (+$('edFingers').value || 3);
+  draft.fingers = (kind === 'edge' || kind === 'rclick') ? 1 : (+$('edFingers').value || 3);
   draft.dir = DIRS[kind] ? $('edDir').value : null;
   draft.shape = kind === 'path' ? $('edShape').value : null;
+  if (kind === 'rclick') {
+    // "__shape" means match a drawn shape instead of a straight direction
+    if (draft.dir === '__shape') { draft.shape = $('edShape').value; draft.dir = null; }
+    else draft.shape = 'dir';
+  }
   draft.action = $('edAction').value;
   draft.combo = draft.action === 'rd-control' ? $('edVerb').value : $('edCombo').value.trim();
   if (kind !== 'custom') draft.points = null;
@@ -240,10 +256,20 @@ window.addEventListener('DOMContentLoaded', async () => {
   $('btnApply').addEventListener('click', applyEditor);
   $('btnCancel').addEventListener('click', closeEditor);
   $('btnSave').addEventListener('click', save);
-  $('btnAdvanced').addEventListener('click', () => $('advanced').classList.toggle('hidden'));
+  // flush any pending edits before the window goes away / loses focus
+  const flush = () => { if (dirty) save(); };
+  window.addEventListener('beforeunload', flush);
+  window.addEventListener('pagehide', flush);
+  window.addEventListener('blur', flush);
+  $('btnAdvanced').addEventListener('click', () => {
+    const a = $('advanced');
+    a.classList.toggle('hidden');
+    if (!a.classList.contains('hidden')) a.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
   $('btnRecord').addEventListener('click', recordCustom);
   $('btnCapture').addEventListener('click', startCapture);
   $('edKind').addEventListener('change', () => { fillDirs($('edKind').value, null); syncFields(); });
+  $('edDir').addEventListener('change', syncFields); // right-drag: "Draw a shape…" reveals the shape picker
   $('edAction').addEventListener('change', syncFields);
   $('masterEnable').addEventListener('change', markDirty);
   $('captureMulti').addEventListener('change', markDirty);

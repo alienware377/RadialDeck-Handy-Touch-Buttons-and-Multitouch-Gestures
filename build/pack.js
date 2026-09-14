@@ -31,6 +31,38 @@ function buildInjector() {
   return exe;
 }
 
+// RDMouseHook.exe: right-button drag gestures. Plain NORMAL-integrity exe (no manifest, no
+// uiAccess) — a global mouse hook must live somewhere killable, never in the uiAccess helper.
+function buildMouseHook() {
+  const csc = path.join(process.env.WINDIR || 'C:\\Windows',
+    'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe');
+  const dir = path.join(__dirname, 'mousehook');
+  const exe = path.join(dir, 'RDMouseHook.exe');
+  execFileSync(csc, [
+    '/nologo', '/target:winexe', '/platform:x64', '/optimize+',
+    `/out:${exe}`, path.join(dir, 'RDMouseHook.cs'),
+  ], { stdio: 'inherit' });
+  // RDJob.exe: Job Object launcher so the helper can never outlive RadialDeck.
+  execFileSync(csc, [
+    '/nologo', '/target:winexe', '/platform:x64', '/optimize+',
+    `/out:${path.join(dir, 'RDJob.exe')}`, path.join(dir, 'RDJob.cs'),
+  ], { stdio: 'inherit' });
+  return exe;
+}
+
+// RDSnap.exe: one-shot foreground-window snapshot used by "close & remember".
+function buildSnap() {
+  const csc = path.join(process.env.WINDIR || 'C:\\Windows',
+    'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe');
+  const dir = path.join(__dirname, 'winsnap');
+  const exe = path.join(dir, 'RDSnap.exe');
+  execFileSync(csc, [
+    '/nologo', '/target:winexe', '/platform:x64', '/optimize+',
+    `/out:${exe}`, path.join(dir, 'RDSnap.cs'),
+  ], { stdio: 'inherit' });
+  return exe;
+}
+
 (async () => {
   // regenerate the multi-size .ico from icon.png so the exe icon stays in sync
   fs.writeFileSync(ICO, await pngToIco(PNG));
@@ -62,6 +94,10 @@ function buildInjector() {
   // compile the uiAccess injector and drop it next to RadialDeck.exe
   const injExe = buildInjector();
   fs.copyFileSync(injExe, path.join(FINAL, 'RadialDeckInput.exe'));
+  const mhExe = buildMouseHook();
+  fs.copyFileSync(mhExe, path.join(FINAL, 'RDMouseHook.exe'));
+  fs.copyFileSync(path.join(path.dirname(mhExe), 'RDJob.exe'), path.join(FINAL, 'RDJob.exe'));
+  fs.copyFileSync(buildSnap(), path.join(FINAL, 'RDSnap.exe'));
 
   console.log('Built (normal integrity) + injector bundled:', FINAL);
   console.log('Next: run `npm run installer` to build the setup .exe (signs both exes), or run build\\uiaccess-setup.ps1 as administrator to sign in place.');
