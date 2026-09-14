@@ -4,6 +4,8 @@
 
 Built for **drawing tablet users**, **touchscreen PC users**, **digital artists**, **streamers**, and anyone who wants a [Stream Deck](https://www.elgato.com/stream-deck)-style controller without extra hardware.
 
+![RadialDeck in use — building a numpad grid layout and firing shortcuts by touch](docs/demo.gif)
+
 ![platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![electron](https://img.shields.io/badge/built%20with-Electron-47848f)
 
 
