@@ -84,6 +84,10 @@ function buildSnap() {
       /^[\\/]dist([\\/]|$)/,
       /^[\\/]build([\\/]|$)/,
       /^[\\/]\.git([\\/]|$)/,
+      // never ship local notes, README media, or stray Electron log dumps
+      /^[\\/]chat-history([\\/]|$)/,
+      /^[\\/]docs([\\/]|$)/,
+      /^[\\/][0-9]+$/,
     ],
   });
 
