@@ -8,6 +8,7 @@ let S = {};          // working copy of settings
 let dirty = false;
 let draft = null;    // binding being edited
 let draftIndex = -1; // -1 = new
+let knownIds = [];   // ids present when this window last loaded the config
 
 const DIRS = {
   edge: [['left', 'From left edge'], ['right', 'From right edge']],
@@ -236,11 +237,15 @@ function save() {
   // pull live settings
   S.enabled = $('masterEnable').checked;
   S.captureMultiFinger = $('captureMulti').checked;
-  window.rd.saveGestures({ gestures: G, gestureSettings: S });
+  // knownIds = what this window was actually showing. Anything main holds that is NOT in
+  // here arrived after we loaded (e.g. Lasso's hand-off writing into the config), so main
+  // must keep it instead of reading its absence as "the user deleted that".
+  window.rd.saveGestures({ gestures: G, gestureSettings: S, knownIds });
   markSaved();
 }
 function loadFrom(cfg) {
   G = JSON.parse(JSON.stringify(cfg.gestures || []));
+  knownIds = G.map((g) => g && g.id).filter(Boolean);
   S = JSON.parse(JSON.stringify(cfg.gestureSettings || {}));
   loadSettings();
   renderList();
