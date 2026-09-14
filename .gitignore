@@ -14,3 +14,6 @@ build/injector/RadialDeckInput.exe
 Thumbs.db
 .DS_Store
 *.log
+
+# local notes, never publish
+chat-history/

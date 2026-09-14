@@ -1,12 +1,11 @@
 # RadialDeck — Handy Touch Buttons and Multitouch Gesture Overlay for Windows
 
-**RadialDeck** is a free, open-source **touch gesture overlay** and **radial keyboard launcher** for Windows 10/11. Float customizable shortcut layouts over any app and fire them by touch, pen, or mouse — then add whole-screen multi-touch gestures (edge swipes, 3–5 finger swipes, pinch, rotate, custom drawn shapes) that trigger commands even when the deck is hidden.
+**RadialDeck** is a free, open-source on-screen **shortcut deck** and **gesture engine** for Windows 10/11 — no phone, no second device, no account, no network. Fire a **radial pie menu** or **grid keypad** of shortcuts by touch, pen or mouse, *and* use whole-screen **multitouch gestures** (edge swipes, 3–5 finger swipes, pinch, rotate, drawn shapes) plus **right-drag mouse gestures** that work even when the deck is hidden. Works over elevated/UAC windows.
 
 Built for **drawing tablet users**, **touchscreen PC users**, **digital artists**, **streamers**, and anyone who wants a [Stream Deck](https://www.elgato.com/stream-deck)-style controller without extra hardware.
 
 ![platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![electron](https://img.shields.io/badge/built%20with-Electron-47848f)
 
-> **Keywords:** Windows touch gestures, multitouch gesture software, radial menu overlay, virtual keyboard shortcut launcher, drawing tablet gestures, touchscreen shortcuts, pen gesture Windows, 3-finger swipe Windows custom, edge swipe Windows, UIAccess overlay
 
 ---
 
@@ -132,6 +131,105 @@ Click **Advanced settings** in the Gesture Editor to tune:
 | Pinch min ratio | 0.72 | Distance ratio threshold for pinch |
 | Path min score | 0.80 | $P match confidence threshold (0–1) |
 | Cooldown (ms) | 350 | Minimum time between gesture fires |
+
+---
+
+## Coming from StrokesPlus.net?
+
+StrokesPlus.net was retired at the end of 2024 and its site is now an archive. RadialDeck is an actively
+maintained option for the same core habit — **hold the right mouse button and draw a shape to run a command**.
+
+| StrokesPlus.net | RadialDeck |
+|---|---|
+| Right-button drag gestures | Yes — direction strokes and custom drawn shapes |
+| Gesture drawing trail | Yes |
+| Send keystrokes / launch apps / media keys | Yes |
+| Lua scripting | No — bindings are set in a visual editor |
+| Per-application gesture sets | Not yet (planned) |
+| Touch and pen gestures | Yes — this is RadialDeck's main focus |
+| On-screen button deck | Yes — radial or grid |
+
+RadialDeck uses Raw Input rather than a low-level mouse hook, so a slow gesture can't stall the rest of
+your desktop.
+
+---
+
+## A maintained gesture alternative for Windows 11
+
+GestureSign has had no new code since 2022 and doesn't support continuous gestures. RadialDeck's pinch,
+rotate and swipe actions are continuous — scroll and zoom track your fingers as you move them, rather than
+firing once at the end of the stroke.
+
+---
+
+## Numpad emulation for laptops and pen displays
+
+Blender's own *Emulate Numpad* option takes over the 1–0 keys, which are also your collection-visibility
+shortcuts. RadialDeck's grid layout gives you Numpad 1/3/7/9/5/0 and `.` as real on-screen buttons instead,
+so you keep both — handy on a laptop, a tablet PC, or a pen display where reaching the keyboard breaks
+your flow.
+
+---
+
+## An edge keyboard for Windows drawing apps
+
+Clip Studio Paint, Krita, Photoshop and Affinity all reward one-handed modifier keys, and the shortcut bars
+that tablet versions of those apps ship don't exist on the desktop. RadialDeck sits at the edge of the
+canvas and fills that gap in any of them, with no plugin to install.
+
+---
+
+## Replaces hardware you'd otherwise buy
+
+A dedicated shortcut deck, dial controller, foot pedal or tablet remote typically runs roughly **$50–$550**
+depending on model. RadialDeck does the on-screen half of that job for free, using the touchscreen, pen
+display or spare tablet you already own.
+
+RadialDeck is not affiliated with, endorsed by, or sponsored by Elgato, Corsair, TourBox, Loupedeck,
+Logitech, Huion, Wacom, XP-Pen, Xencelabs, Razer or Contour Design. All product names and trademarks are
+the property of their respective owners.
+
+---
+
+## Questions
+
+### Does this work without a keyboard?
+Yes. Every button sends its keystroke to whichever app has focus, so a touchscreen-only machine can drive
+apps that otherwise need a full keyboard.
+
+### Does it work over admin windows?
+Yes. A small signed helper process carries the `uiAccess` privilege so keystrokes reach elevated windows
+and UAC prompts. The helper sends input only — it does not log keystrokes and makes no network connections.
+
+### Do I need a phone or a second device?
+No. Everything runs on the same PC. There is no companion app, no pairing and no account.
+
+### Does it work with Huion, XP-Pen and Wacom tablets?
+Yes, for touch and pen input that Windows reports normally. RadialDeck reads Windows touch and Raw Input,
+so it doesn't depend on a particular vendor driver.
+
+### Will it conflict with my app's own touch gestures?
+It can. Krita uses a 4-finger tap and Clip Studio Paint uses 2-finger undo / 3-finger redo, and the
+whole-screen engine will currently compete with those. Per-app suppression is planned; for now, turn off
+the finger counts you don't need in the gesture editor.
+
+### Why does my antivirus flag it?
+The installer is not yet signed by a commercial certificate authority, which some scanners treat as
+unknown rather than unsafe. The source is here in full, and you can build it yourself with `npm run installer`.
+
+### Can I use it on a spacedesk or Duet second screen?
+Yes. Those show up as ordinary monitors with touch digitizers, so you can park the deck there and keep
+your main screen clear.
+
+---
+
+## Known limitations
+
+- Keystroke actions need the target app to have focus, so they can't drive a background window.
+- Exclusive-fullscreen games bypass the desktop compositor — nothing can draw over them.
+- Apps with their own multi-finger gestures will compete with the whole-screen engine until per-app
+  suppression ships.
+- The installer's helper is self-signed today; a commercial certificate is on the list.
 
 ---
 
