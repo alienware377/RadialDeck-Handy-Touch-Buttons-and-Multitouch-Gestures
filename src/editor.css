@@ -52,6 +52,12 @@ aside {
 #layoutList li .del { opacity: 0; color: var(--muted); font-size: 14px; }
 #layoutList li:hover .del { opacity: 1; }
 #layoutList li .del:hover { color: #ff6b6b; }
+/* ● = this profile is on the deck right now; ○ = click to put it there */
+#layoutList li .act { opacity: 0; color: var(--muted); font-size: 12px; line-height: 1; }
+#layoutList li:hover .act { opacity: 1; }
+#layoutList li.live .act { opacity: 1; color: var(--accent); }
+#layoutList li .act:hover { color: var(--accent); }
+#layoutList li.live .lname { font-weight: 600; }
 
 #work { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 

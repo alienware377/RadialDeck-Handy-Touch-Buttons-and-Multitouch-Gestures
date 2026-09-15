@@ -19,7 +19,7 @@ const DIRS = {
   rclick: [['up', 'Drag up'], ['down', 'Drag down'], ['left', 'Drag left'], ['right', 'Drag right'], ['__shape', 'Draw a shape…']],
 };
 const KIND_LABEL = { edge: 'Edge', swipe: 'Swipe', tap: 'Tap', 'double-tap': 'Double tap', pinch: 'Pinch', rotate: 'Rotate', path: 'Path', custom: 'Custom', rclick: 'Right-drag' };
-const VERB_LABEL = { 'toggle-deck': 'Show/hide deck', 'show-deck': 'Show deck', 'hide-deck': 'Hide deck', 'next-layout': 'Next layout', 'prev-layout': 'Prev layout', 'collapse-toggle': 'Collapse', 'close-remember': 'Close & remember', 'reopen-last': 'Reopen last closed' };
+const VERB_LABEL = { 'toggle-deck': 'Show/hide deck', 'show-deck': 'Show deck', 'hide-deck': 'Hide deck', 'next-layout': 'Next layout', 'pick-layout': 'Profile picker', 'prev-layout': 'Prev layout', 'collapse-toggle': 'Collapse', 'close-remember': 'Close & remember', 'reopen-last': 'Reopen last closed' };
 const SHAPE_LABEL = { circle: 'Circle', 'half-circle': 'Half circle', s: 'S', 's-side': 'Sideways S', figure8: 'Figure 8' };
 
 function gid() { return 'g' + Math.random().toString(36).slice(2, 9); }

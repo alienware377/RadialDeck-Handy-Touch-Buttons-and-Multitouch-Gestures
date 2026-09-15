@@ -314,7 +314,14 @@ ipcMain.on('save-config', (_e, newCfg) => {
   store.save(cfg); broadcastConfig(); startGestures();
 });
 
-ipcMain.on('set-active-layout', (_e, idx) => { cfg.activeLayout = idx; store.save(cfg); broadcastConfig(); });
+// Only the overlay renders the active layout, so push just to it. Broadcasting to the
+// editor would replace its working copy and silently discard whatever the user was
+// part-way through editing.
+ipcMain.on('set-active-layout', (_e, idx) => {
+  cfg.activeLayout = idx;
+  store.save(cfg);
+  if (overlayWin && !overlayWin.isDestroyed()) overlayWin.webContents.send('config', cfg);
+});
 
 // Editor: capture the next on-screen stroke as a custom-gesture template. Resolves with
 // { ok, points, fingers } or { ok:false, timeout }. Engine is started if it wasn't running.
@@ -445,6 +452,11 @@ function rdControl(verb) {
     case 'hide-deck': if (overlayWin && !overlayWin.isDestroyed()) overlayWin.hide(); break;
     case 'next-layout': switchLayout(1); break;
     case 'prev-layout': switchLayout(-1); break;
+    case 'pick-layout':
+      if (!overlayWin || overlayWin.isDestroyed()) createOverlay();
+      else { ensureOnScreen(); overlayWin.show(); }
+      if (overlayWin && !overlayWin.isDestroyed()) overlayWin.webContents.send('open-picker');
+      break;
     case 'close-remember':
       // snapshot what's in front, THEN close it
       closeStack.capture(() => { if (kb) kb.press('ctrl+w'); });

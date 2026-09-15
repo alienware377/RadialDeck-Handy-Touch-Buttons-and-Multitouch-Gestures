@@ -150,18 +150,29 @@ function renderLayouts() {
   cfg.layouts.forEach((lay, i) => {
     const li = document.createElement('li');
     if (i === sel) li.classList.add('sel');
+    const live = i === (cfg.activeLayout || 0);
+    if (live) li.classList.add('live');
     li.innerHTML =
       `<span class="swatch" style="background:${lay.color || '#5b8cff'}"></span>` +
       `<span class="lname">${escapeHtml(lay.name || 'Untitled')}</span>` +
       `<span class="mtag">${lay.mode === 'grid' ? 'grid' : 'rad'}</span>` +
+      `<span class="act" title="${live ? 'Showing on the deck now' : 'Show this profile on the deck'}">${live ? '●' : '○'}</span>` +
       `<span class="del" title="Delete layout">🗑</span>`;
     li.addEventListener('click', (e) => {
-      if (e.target.classList.contains('del')) return;
+      if (e.target.classList.contains('del') || e.target.classList.contains('act')) return;
       sel = i; navStack = []; selId = null; renderAll();
     });
+    li.querySelector('.act').addEventListener('click', (e) => { e.stopPropagation(); activateLayout(i); });
     li.querySelector('.del').addEventListener('click', (e) => { e.stopPropagation(); deleteLayout(i); });
     list.appendChild(li);
   });
+}
+// Put a profile on the deck right now, without touching which one is being edited.
+// Sent straight to main so it applies even with unsaved edits open here.
+function activateLayout(i) {
+  cfg.activeLayout = i;
+  window.rd.setActiveLayout(i);
+  renderLayouts();
 }
 function deleteLayout(i) {
   if (cfg.layouts.length <= 1) { alert('Keep at least one layout.'); return; }
@@ -431,7 +442,14 @@ function renderProps() {
     h += row('Action', `<select id="pAction">
       <option value="press">Press</option><option value="hold">Hold</option>
       <option value="toggle">Toggle</option><option value="command">Command</option>
-      <option value="gesture-toggle">Gestures on/off</option></select>`);
+      <option value="gesture-toggle">Gestures on/off</option>
+      <option value="go-layout">Switch to profile</option>
+      <option value="layout-picker">Profile picker</option></select>`);
+    if (it.action === 'go-layout') {
+      const opts = cfg.layouts.map((l) =>
+        `<option value="${escapeAttr(l.id)}">${escapeHtml(l.name || 'Untitled')}</option>`).join('');
+      h += row('Profile', `<select id="pLayoutId">${opts}</select>`);
+    }
   }
   if (it.type === 'scroll') {
     h += row('Axis', `<select id="pAxis"><option value="v">Vertical</option><option value="h">Horizontal</option></select>`);
@@ -486,6 +504,11 @@ function renderProps() {
   p.innerHTML = h;
 
   if (it.type === 'key') $('pAction').value = it.action || 'press';
+  if (it.type === 'key' && it.action === 'go-layout' && $('pLayoutId')) {
+    // default a fresh button to the profile being edited, so it is never left pointing nowhere
+    if (!it.layoutId || !cfg.layouts.some((l) => l.id === it.layoutId)) it.layoutId = cfg.layouts[sel].id;
+    $('pLayoutId').value = it.layoutId;
+  }
   if (it.type === 'scroll') $('pAxis').value = it.axis || 'v';
   if (it.type === 'mousebtn') { $('pButton').value = it.button || 'l'; $('pMode').value = it.mode || 'click'; }
 
@@ -493,7 +516,12 @@ function renderProps() {
   if (it.type === 'key') {
     // typing/recording a combo auto-renames the label while it.autoLabel is on
     bindP('pCombo', 'input', (v) => { setKeyCombo(it, v); refreshItemVisual(); });
-    bindP('pAction', 'change', (v) => { it.action = v; renderProps(); refreshItemVisual(); });
+    bindP('pAction', 'change', (v) => {
+      it.action = v;
+      if (v === 'go-layout' && !it.layoutId) it.layoutId = cfg.layouts[sel].id;
+      renderProps(); refreshItemVisual();
+    });
+    bindP('pLayoutId', 'change', (v) => { it.layoutId = v; refreshItemVisual(); });
     $('pRec').addEventListener('click', () => captureCombo((c) => { setKeyCombo(it, c); $('pCombo').value = c; refreshItemVisual(); markDirty(); }));
   }
   if (it.type === 'scroll') {

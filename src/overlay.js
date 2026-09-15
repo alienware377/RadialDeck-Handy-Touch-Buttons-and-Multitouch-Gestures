@@ -8,6 +8,8 @@ let cfg = null;
 let active = 0;
 let navStack = [];          // group ids drilled into
 let collapsed = false;
+let picking = false;        // profile picker open (long-press orb, or a picker button)
+let pickHover = -1;         // layout index highlighted while sliding with the finger down
 let winX = 0, winY = 0;     // our tracked window top-left (DIP)
 let orbCenter = { x: 180, y: 180 };
 let lastW = 0, lastH = 0;   // the window size we're currently rendered at (for drag-start retract tracking)
@@ -34,6 +36,7 @@ function level() {
   const L = layout();
   const cell = L.cell || 60, gap = L.gap || 8;
   if (collapsed) return { renderMode: 'collapsed', items: [], cell, gap, cols: 0, rows: 0 };
+  if (picking) return { renderMode: 'picker', items: [], cell, gap, cols: 0, rows: 0 };
   if (navStack.length) {
     const { items, group } = resolveGroup();
     if (group && group.type === 'touchpad') return { renderMode: 'touchpad', pad: group, items: [], cell, gap, cols: 0, rows: 0 };
@@ -46,8 +49,16 @@ const spanCols = (items) => Math.max(1, ...items.map((i) => (i.gx || 0) + (i.gw 
 const spanRows = (items) => Math.max(1, ...items.map((i) => (i.gy || 0) + (i.gh || 1)));
 
 // ---------- size for a level ----------
+const PICK_W = 168, PICK_H = 40, PICK_GAP = 6;
 function sizeFor(lv) {
   if (lv.renderMode === 'collapsed') return { w: COLLAPSE, h: COLLAPSE, orbX: COLLAPSE / 2, orbY: COLLAPSE / 2, gridTop: 0, gridLeft: 0 };
+  if (lv.renderMode === 'picker') {
+    const n = Math.max(1, cfg.layouts.length);
+    const orbBar = ORBG + 14;
+    const w = PICK_W + 2 * PAD;
+    const h = orbBar + n * PICK_H + (n - 1) * PICK_GAP + PAD;
+    return { w, h, orbX: w / 2, orbY: orbBar / 2, gridTop: orbBar, gridLeft: PAD };
+  }
   if (lv.renderMode === 'touchpad') {
     const pw = lv.pad.padW || 300, ph = lv.pad.padH || 360, orbBar = ORBG + 14;
     const w = pw + 2 * PAD, h = orbBar + ph + PAD;
@@ -75,14 +86,62 @@ function render(lv, sz) {
   orb.style.background = `radial-gradient(circle at 35% 30%, ${shade(L.color, 30)}, ${L.color} 70%, ${shade(L.color, -40)})`;
   orb.style.left = sz.orbX + 'px'; orb.style.top = sz.orbY + 'px';
   orbLabel.style.left = sz.orbX + 'px'; orbLabel.style.top = (sz.orbY + (lv.renderMode === 'radial' ? ORBR / 2 + 10 : ORBG / 2 + 2)) + 'px';
-  orbLabel.textContent = inGroup ? (resolveGroup().group?.label || '') : (L.name || '');
+  orbLabel.textContent = lv.renderMode === 'picker' ? 'Switch profile'
+    : inGroup ? (resolveGroup().group?.label || '') : (L.name || '');
   if (lv.renderMode !== 'collapsed') pokeOrbLabel(); // show now, auto-fade after a couple secs
 
   panel.innerHTML = '';
   if (lv.renderMode === 'collapsed') return;
+  if (lv.renderMode === 'picker') { renderPicker(sz); return; }
   if (lv.renderMode === 'touchpad') { renderTouchpadSurface(lv, sz); return; }
   if (lv.renderMode === 'radial') renderRadial(lv, sz);
   else renderGrid(lv, sz);
+}
+
+// ---------- profile picker ----------
+// One chip per layout. Reached by long-pressing the orb (slide with the finger still down,
+// release on the one you want) or by a button whose action is 'layout-picker'.
+function renderPicker(sz) {
+  cfg.layouts.forEach((lay, i) => {
+    const el = document.createElement('div');
+    el.className = 'pickitem interactive' + (i === active ? ' current' : '') + (i === pickHover ? ' hot' : '');
+    el.dataset.pick = String(i);
+    el.style.left = sz.gridLeft + 'px';
+    el.style.top = (sz.gridTop + i * (PICK_H + PICK_GAP)) + 'px';
+    el.style.width = PICK_W + 'px'; el.style.height = PICK_H + 'px';
+    el.innerHTML = `<span class="pdot" style="background:${lay.color || '#5b8cff'}"></span>` +
+      `<span class="pname">${esc(lay.name || 'Untitled')}</span>` +
+      `<span class="ptag">${lay.mode === 'grid' ? 'grid' : 'radial'}</span>`;
+    el.addEventListener('pointerdown', (e) => { e.preventDefault(); chooseLayout(i); });
+    panel.appendChild(el);
+  });
+}
+function openPicker() {
+  if (!cfg || !cfg.layouts.length) return;
+  pickHover = -1;
+  changeState(() => { picking = true; collapsed = false; navStack = []; });
+}
+function closePicker() { if (picking) changeState(() => { picking = false; pickHover = -1; }); }
+function chooseLayout(i) {
+  if (!cfg || i < 0 || i >= cfg.layouts.length) return;
+  changeState(() => {
+    active = i; picking = false; pickHover = -1; navStack = []; collapsed = false;
+    window.rd.setActiveLayout(active);
+  });
+}
+function goLayoutById(id) {
+  if (!cfg || !id) return;
+  const i = cfg.layouts.findIndex((l) => l.id === id);
+  if (i >= 0) chooseLayout(i);
+}
+// While the finger is still down after a long-press, highlight whatever chip it is over.
+function hoverPick(x, y) {
+  const el = document.elementFromPoint(x, y);
+  const chip = el && el.closest ? el.closest('.pickitem') : null;
+  const idx = chip ? Number(chip.dataset.pick) : -1;
+  if (idx === pickHover) return;
+  pickHover = idx;
+  [...panel.children].forEach((c) => c.classList.toggle('hot', Number(c.dataset.pick) === pickHover));
 }
 
 function renderTouchpadSurface(lv, sz) {
@@ -184,8 +243,11 @@ function paint(el, k) {
     (k.action && k.action !== 'press' ? `<span class="badge">${badge(k.action)}</span>` : '');
   // gesture-toggle buttons reflect the live engine state (lit = gestures on)
   if (k.action === 'gesture-toggle') el.classList.toggle('on', !!(cfg && cfg.gestureSettings && cfg.gestureSettings.enabled !== false));
+  // a "switch to this profile" button lights up when that profile is the one showing
+  if (k.action === 'go-layout') el.classList.toggle('on', !!(cfg && cfg.layouts[active] && cfg.layouts[active].id === k.layoutId));
 }
-const badge = (a) => (a === 'hold' ? 'HLD' : a === 'toggle' ? 'TGL' : a === 'command' ? 'CMD' : a === 'gesture-toggle' ? 'GES' : '');
+const badge = (a) => (a === 'hold' ? 'HLD' : a === 'toggle' ? 'TGL' : a === 'command' ? 'CMD'
+  : a === 'gesture-toggle' ? 'GES' : a === 'go-layout' ? 'PRO' : a === 'layout-picker' ? 'PRO' : '');
 
 // ---------- item interactions ----------
 let interacting = 0;
@@ -198,6 +260,10 @@ function bindItem(el, k) {
     el.addEventListener('pointerdown', (e) => { e.preventDefault(); window.rd.keyAction({ id: k.id, combo: k.combo, action: 'toggle', phase: 'down' }); });
   } else if (k.action === 'gesture-toggle') {
     el.addEventListener('pointerdown', (e) => { e.preventDefault(); window.rd.keyAction({ id: k.id, action: 'gesture-toggle', phase: 'down' }); });
+  } else if (k.action === 'go-layout') {
+    el.addEventListener('pointerdown', (e) => { e.preventDefault(); flash(el); goLayoutById(k.layoutId); });
+  } else if (k.action === 'layout-picker') {
+    el.addEventListener('pointerdown', (e) => { e.preventDefault(); flash(el); openPicker(); });
   } else {
     el.addEventListener('pointerdown', (e) => { e.preventDefault(); flash(el); window.rd.keyAction({ id: k.id, combo: k.combo, action: k.action }); });
   }
@@ -344,6 +410,9 @@ orb.addEventListener('pointerdown', (e) => {
 });
 orb.addEventListener('pointermove', (e) => {
   if (!drag) return;
+  // Picker is open and the finger never left the orb: this is the slide-to-choose phase,
+  // NOT a window drag. Highlight whatever chip is under the finger instead.
+  if (picking && longFired) { hoverPick(e.clientX, e.clientY); return; }
   const dist = Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy);
   if (!drag.moved && dist > 4) { drag.moved = true; clearTimeout(longTimer); enterDragCollapsing(); }
   if (drag.moved) followCursor(e.clientX, e.clientY);
@@ -351,6 +420,14 @@ orb.addEventListener('pointermove', (e) => {
 function endDrag(cancelled) {
   clearTimeout(longTimer);
   if (!drag) return;
+  // Releasing after a slide-to-choose: take the highlighted profile. Released without
+  // sliding anywhere, the picker just stays open so it can be tapped instead.
+  if (picking && longFired) {
+    drag = null;
+    if (!cancelled && pickHover >= 0) chooseLayout(pickHover);
+    else { pickHover = -1; [...panel.children].forEach((c) => c.classList.remove('hot')); }
+    return;
+  }
   if (drag.moved) {
     // settle into the collapsed orb wherever it ended up (even if the retract
     // animation was still mid-flight), keeping the orb pinned to its screen spot.
@@ -375,9 +452,10 @@ function onLongPress() {
   if (!drag || drag.moved) return;
   longFired = true;
   if (navStack.length) changeState(() => { navStack = []; });          // back to layout root
-  else changeState(() => { active = (active + 1) % cfg.layouts.length; navStack = []; collapsed = false; window.rd.setActiveLayout(active); });
+  else openPicker();   // keep holding and slide onto a profile; release picks it
 }
 function onTap() {
+  if (picking) { closePicker(); return; }
   if (navStack.length) changeState(() => { navStack.pop(); });
   else changeState(() => { collapsed = !collapsed; if (collapsed) navStack = []; }, true);
 }
@@ -650,4 +728,5 @@ window.rd.onConfig((c) => {
   active = Math.min(cfg.activeLayout || 0, cfg.layouts.length - 1);
   relayout({ x: winX + orbCenter.x, y: winY + orbCenter.y }, false); // live editor updates, stay anchored
 });
+window.rd.onOpenPicker(() => { if (cfg) openPicker(); });
 window.rd.getConfig().then(boot);

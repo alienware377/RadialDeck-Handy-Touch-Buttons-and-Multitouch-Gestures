@@ -20,4 +20,5 @@ contextBridge.exposeInMainWorld('rd', {
   saveGestures: (payload) => ipcRenderer.send('save-gestures', payload),
   onConfig: (cb) => ipcRenderer.on('config', (_e, c) => cb(c)),
   onToggleState: (cb) => ipcRenderer.on('toggle-state', (_e, s) => cb(s)),
+  onOpenPicker: (cb) => ipcRenderer.on('open-picker', () => cb()),
 });

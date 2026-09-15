@@ -167,6 +167,9 @@ function defaultConfig() {
 function migrate(cfg) {
   if (!cfg || !cfg.layouts) return defaultConfig();
   for (const l of cfg.layouts) {
+    // Layouts need a stable id so a "switch to this profile" button keeps pointing at the
+    // right one after the list is reordered or renamed.
+    if (!l.id) l.id = 'lay' + uid();
     if (!l.mode) l.mode = 'radial';
     if (!l.items && l.keys) { l.items = l.keys; delete l.keys; }
     if (!l.items) l.items = [];
@@ -347,7 +350,7 @@ function load() {
   // merely locked/corrupt with no usable backup, still return defaults so the app can
   // run — but save() preserves the existing file to .bak before overwriting, so nothing
   // is lost irrecoverably.
-  return applySeed(defaultConfig());
+  return applySeed(migrate(defaultConfig()));   // migrate also stamps layout ids
 }
 
 function save(cfg) {
